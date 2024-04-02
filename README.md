@@ -24,15 +24,24 @@ When these conditions are met, and the component is not already wrapped in React
 
 #### Incorrect Code:
 
+```markdown
+```javascript
 const MyComponent = ({ title, age }) => {
   return <h1>{title} - {age}</h1>;
 };
+```
+```
+
 
 #### Correct Code:
 
+```markdown
+```javascript
 const MyComponent = React.memo(({ title, age }) => {
   return <h1>{title} - {age}</h1>;
 });
+```
+```
 
 ### Options
 
