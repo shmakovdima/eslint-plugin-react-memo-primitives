@@ -1,0 +1,6 @@
+{
+  "plugins": ["react-memo-primitives"],
+  "rules": {
+    "react-memo-primitives/require-memo-primitives": "error"
+  }
+}
