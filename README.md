@@ -24,16 +24,28 @@ When these conditions are met, and the component is not already wrapped in React
 
 #### Incorrect Code:
 
-```javascript
-const MyComponent = ({ title, age }) => {
+```typescript
+
+type Props = {
+  title: string;
+  age: number;
+}
+
+const MyComponent = ({ title, age }: Props) => {
   return <h1>{title} - {age}</h1>;
 };
 ```
 
 #### Correct Code:
 
-```javascript
-const MyComponent = React.memo(({ title, age }) => {
+```typescript
+
+type Props = {
+  title: string;
+  age: number;
+}
+
+const MyComponent = React.memo(({ title, age }: Props) => {
   return <h1>{title} - {age}</h1>;
 });
 ```
@@ -52,7 +64,7 @@ npm install eslint-plugin-react-memo-primitives --save-dev
 
 Add react-memo-primitives to the plugins section of your ESLint configuration file. You can omit the eslint-plugin- prefix. Then configure the react-memo-primitives/require-memo-primitives rule under the rules section.
 
-```javascript
+```typescript
 {
   "plugins": ["react-memo-primitives"],
   "rules": {
