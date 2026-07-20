@@ -1,82 +1,63 @@
+# react-memo-primitives
 
-# eslint-plugin-react-memo-primitives
+Lint rules that enforce `React.memo` on components with primitive props, and flag `React.memo` on
+components with no props — implemented for three linters. Pick the package that matches your
+toolchain:
 
-An ESLint plugin that enforces the use of React.memo for functional React components that receive primitive props. This optimization can help to prevent unnecessary re-renders and improve performance in React applications, particularly when components are frequently re-rendered with the same primitive props.
+| Package                                                                               | Linter                       | Config format                                  |
+| ------------------------------------------------------------------------------------- | ---------------------------- | ---------------------------------------------- |
+| [`eslint-plugin-react-memo-primitives`](packages/eslint-plugin-react-memo-primitives) | ESLint                       | legacy `.eslintrc` and flat `eslint.config.js` |
+| [`biome-plugin-react-memo-primitives`](packages/biome-plugin-react-memo-primitives)   | [Biome](https://biomejs.dev) | GritQL plugins (`biome.jsonc`)                 |
+| [`oxlint-plugin-react-memo-primitives`](packages/oxlint-plugin-react-memo-primitives) | [oxlint](https://oxc.rs)     | JS plugin (`.oxlintrc.json`)                   |
 
-## Rule: react-memo-primitives/require-memo-primitives
+## Rules
 
-This rule checks if a functional React component that only receives primitive props (string, number, boolean, null, undefined, symbol, bigint) is wrapped in React.memo. If not, the rule will report an error, prompting the developer to wrap the component for potential performance benefits.
+Every package implements the same two rules:
 
-### When to Use
+- **require-memo-primitives** — a functional component that returns JSX and destructures a
+  single object parameter made up entirely of primitive-looking props (string, number, boolean,
+  etc.) must be wrapped in `memo(...)` or `React.memo(...)`.
+- **no-unnecessary-memo** — a component wrapped in `memo(...)` / `React.memo(...)` that takes no
+  props doesn't need to be — memoizing a component with no props buys nothing.
 
-Use this rule when you want to ensure that all functional components in your codebase that could benefit from memoization are correctly wrapped in React.memo. This is especially useful in larger applications where unnecessary re-renders could lead to performance issues.
-
-### Rule Details
-
-This rule targets functional components that satisfy the following conditions:
-
-- The component is defined as a function (either a function declaration, a function expression, or an arrow function).
-- The component receives a single props argument that is deconstructed into primitive values.
-
-When these conditions are met, and the component is not already wrapped in React.memo, the rule will report an error.
-
-### Examples
-
-#### Incorrect Code:
-
-```typescript
-
-type Props = {
-  title: string;
-  age: number;
-}
-
-const MyComponent = ({ title, age }: Props) => {
-  return <h1>{title} - {age}</h1>;
+```tsx
+// require-memo-primitives: reports MyComponent (has primitive props, not memoized)
+const MyComponent = ({ title, age }: { title: string; age: number }) => {
+  return (
+    <h1>
+      {title} - {age}
+    </h1>
+  );
 };
-```
 
-#### Correct Code:
+// no-unnecessary-memo: reports Header (memoized, but takes no props)
+const Header = React.memo(() => {
+  return <h1>Static</h1>;
+});
 
-```typescript
-
-type Props = {
-  title: string;
-  age: number;
-}
-
-const MyComponent = React.memo(({ title, age }: Props) => {
-  return <h1>{title} - {age}</h1>;
+// correct: memoized component with primitive props
+const Correct = React.memo(({ title }: { title: string }) => {
+  return <h1>{title}</h1>;
 });
 ```
 
-### Options
+None of the three linter APIs give a lint rule access to TypeScript's type checker, so all three
+implementations approximate "primitive prop" structurally instead of by real type: the
+ESLint/oxlint versions use a naming heuristic (lowercase-first identifier binding), while the
+Biome/GritQL version checks only that the parameter destructures into an object pattern at all.
+See each package's README for the exact heuristic and its known false positives/negatives.
 
-This rule does not have any options.
+## Development
 
-### Installation
+This is an npm workspaces monorepo; each package under `packages/` is published independently.
+There's no shared build step — every package ships its source directly (plain CommonJS for the
+ESLint and oxlint packages, `.grit` files for Biome).
 
-Install eslint-plugin-react-memo-primitives as a development dependency:
+## Testing
 
-npm install eslint-plugin-react-memo-primitives --save-dev
-
-### Usage
-
-Add react-memo-primitives to the plugins section of your ESLint configuration file. You can omit the eslint-plugin- prefix. Then configure the react-memo-primitives/require-memo-primitives rule under the rules section.
-
-```typescript
-{
-  "plugins": ["react-memo-primitives"],
-  "rules": {
-    "react-memo-primitives/require-memo-primitives": "error"
-  }
-}
+```sh
+npm test
 ```
 
-### Compatibility
-
-This plugin assumes you are using ESLint 6 or later and has React installed in your project.
-
-### Contributing
-
-Contributions, issues, and feature requests are welcome! Feel free to check issues page
+Runs every package's test suite (`npm test --workspaces --if-present` under the hood). Each
+package tests itself against the real linter binary/API it targets — see its README for details.

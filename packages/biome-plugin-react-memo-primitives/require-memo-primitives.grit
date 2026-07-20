@@ -1,0 +1,33 @@
+language js(jsx)
+
+// Flags `const Foo = (props) => <jsx/>` (or a function-expression / function-declaration
+// equivalent) when `props` is destructured into an object pattern and the component isn't
+// wrapped in `memo(...)` / `React.memo(...)`.
+//
+// Heuristic, not a type check: GritQL has no access to TypeScript types, so "primitive" is
+// approximated as "the parameter is a destructured object pattern (JsObjectBindingPattern)".
+// Unlike the ESLint/oxlint versions, this doesn't inspect individual property names or exclude
+// nested object/array sub-patterns (e.g. `{ user: { name } }`) — GritQL's node-kind matching
+// couldn't express that exclusion reliably as of Biome 2.5.4 (see README limitations). A
+// destructured prop that is itself an object/array will still be treated as primitive here.
+//
+// Each alternative below requires the function to be the *direct* declarator init (or a bare
+// declaration) — a `memo(...)`/`React.memo(...)`-wrapped function has a different outer shape
+// (the CallExpression sits between the declarator and the function) and so never matches these
+// patterns to begin with. That's what makes "not wrapped in memo" implicit here, instead of an
+// explicit `not contains` check on the component — the wrapped shape simply isn't one of these
+// alternatives.
+
+or {
+  `const $name = ($props) => $body` as $component,
+  `const $name = function ($props) { $body }` as $component,
+  `function $name($props) { $body }` as $component
+} where {
+  $props <: contains JsObjectBindingPattern(),
+  $body <: contains JsxTagExpression(),
+  register_diagnostic(
+    span = $name,
+    message = "Component with primitive props should be wrapped in React.memo",
+    severity = "error"
+  )
+}

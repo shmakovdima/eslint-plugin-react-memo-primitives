@@ -1,0 +1,39 @@
+// expect-error: missing memo, primitive props, arrow
+const _NotMemoized = ({ title, age }) => {
+  return (
+    <h1>
+      {title}-{age}
+    </h1>
+  );
+};
+
+// expect-error: missing memo, primitive props, function declaration
+function _NotMemoizedFn({ title }) {
+  return <h1>{title}</h1>;
+}
+
+// expect-ok: already wrapped in React.memo
+const _MemoizedReact = React.memo(({ title, age }) => {
+  return (
+    <h1>
+      {title}-{age}
+    </h1>
+  );
+});
+
+// expect-ok: already wrapped in bare memo
+const _MemoizedBare = memo(({ title, age }) => {
+  return (
+    <h1>
+      {title}-{age}
+    </h1>
+  );
+});
+
+// expect-ok: no props at all, no memo needed
+const _NoPropsNoMemo = () => {
+  return <h1>Static</h1>;
+};
+
+// expect-ok: not a component, no JSX
+const _util = ({ a, b }) => a + b;

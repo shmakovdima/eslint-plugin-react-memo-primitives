@@ -1,0 +1,35 @@
+language js(jsx)
+
+// Flags `const Foo = memo(() => <jsx/>)` / `const Foo = React.memo(() => <jsx/>)` when the
+// wrapped component takes no props (no parameters, or an empty `{}` destructure).
+//
+// GritQL doesn't let a single `where` clause branch on "no props OR empty destructure" via a
+// nested `or` of `contains` conditions (that combination fails to compile as of Biome 2.5.4 —
+// see README limitations). Instead, every no-params/empty-destructure/memo-vs-React.memo/
+// arrow-vs-function-expression combination is spelled out as its own top-level alternative.
+
+or {
+  `const $name = memo(() => $body)` as $component,
+  `const $name = React.memo(() => $body)` as $component,
+  `const $name = memo(function () { $body }) ` as $component,
+  `const $name = React.memo(function () { $body }) ` as $component,
+  `const $name = memo(($props) => $body)` as $component where {
+    $props <: contains JsObjectBindingPattern(properties = [])
+  },
+  `const $name = React.memo(($props) => $body)` as $component where {
+    $props <: contains JsObjectBindingPattern(properties = [])
+  },
+  `const $name = memo(function ($props) { $body }) ` as $component where {
+    $props <: contains JsObjectBindingPattern(properties = [])
+  },
+  `const $name = React.memo(function ($props) { $body }) ` as $component where {
+    $props <: contains JsObjectBindingPattern(properties = [])
+  }
+} where {
+  $body <: contains JsxTagExpression(),
+  register_diagnostic(
+    span = $name,
+    message = "Component with no props does not need to be wrapped in React.memo",
+    severity = "error"
+  )
+}

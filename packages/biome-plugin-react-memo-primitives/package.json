@@ -1,0 +1,36 @@
+{
+  "name": "biome-plugin-react-memo-primitives",
+  "version": "1.0.0",
+  "description": "Biome GritQL plugins: enforce React.memo on components with primitive props, and flag unnecessary React.memo on components with no props",
+  "license": "MIT",
+  "repository": "shmakovdima/eslint-plugin-react-memo-primitives",
+  "author": {
+    "name": "Dmitrii Shmakov",
+    "email": "contact@shmakovdima.com",
+    "url": "https://shmakovdima.com"
+  },
+  "funding": "https://www.buymeacoffee.com/shmakovdima",
+  "files": [
+    "require-memo-primitives.grit",
+    "no-unnecessary-memo.grit",
+    "biome.jsonc"
+  ],
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "keywords": [
+    "biome",
+    "biome-plugin",
+    "gritql",
+    "react",
+    "memo",
+    "react-memo",
+    "performance"
+  ],
+  "peerDependencies": {
+    "@biomejs/biome": ">=2.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.4"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "name": "oxlint-plugin-react-memo-primitives",
+  "version": "1.0.0",
+  "description": "oxlint JS plugin: enforce React.memo on components with primitive props, and flag unnecessary React.memo on components with no props",
+  "license": "MIT",
+  "repository": "shmakovdima/eslint-plugin-react-memo-primitives",
+  "author": {
+    "name": "Dmitrii Shmakov",
+    "email": "contact@shmakovdima.com",
+    "url": "https://shmakovdima.com"
+  },
+  "funding": "https://www.buymeacoffee.com/shmakovdima",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "utils.js",
+    ".oxlintrc.json"
+  ],
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "keywords": [
+    "oxlint",
+    "oxlint-plugin",
+    "oxc",
+    "react",
+    "memo",
+    "react-memo",
+    "performance"
+  ],
+  "peerDependencies": {
+    "oxlint": ">=1.43.0"
+  },
+  "dependencies": {
+    "@oxlint/plugins": "^1.74.0"
+  },
+  "devDependencies": {
+    "oxlint": "^1.74.0"
+  }
+}

@@ -1,18 +1,11 @@
 {
-  "name": "eslint-plugin-react-memo-primitives",
-	"version": "0.0.1",
-	"description": "Enforce React.memo on components with primitive props using this ESLint rule",
-	"license": "MIT",
-	"repository": "shmakovdima/eslint-plugin-react-memo-primitives",  	
-  "author": {
-		"name": "Dmitrii Shmakov",
-		"email": "contact@shmakovdima.com",
-		"url": "https://shmakovdima.com"
-	},
-  "funding": "https://www.buymeacoffee.com/shmakovdima",
-  "main": "lib/index.js",
-  "sideEffects": false,
-  "devDependencies": {
-    "eslint": "^8.57.0"
+  "name": "react-memo-primitives-monorepo",
+  "private": true,
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm test --workspaces --if-present"
   }
 }
