@@ -84,3 +84,73 @@ const _ReferralHeroInputMemoized = memo(
     );
   },
 );
+
+// expect-ok: array member and JSX.Element union member are both non-primitive
+type _NumberSpeakProps = {
+  title: JSX.Element | string;
+  locale: _LocaleType;
+  historicalPerformance: _HistoricalPerformance[];
+  hideCTA?: boolean;
+};
+const _NumberSpeak = ({
+  hideCTA,
+  historicalPerformance,
+  locale,
+  title,
+}: _NumberSpeakProps) => {
+  return <div>{title}</div>;
+};
+
+type _CompareRatesProps = { locale: _LocaleType; variant?: "mica" | "trade" };
+// expect-error: locale (bare unresolved reference, no type args) trusted as primitive
+const _CompareRates = ({ locale, variant = "trade" }: _CompareRatesProps) => {
+  return (
+    <div>
+      {locale}-{variant}
+    </div>
+  );
+};
+
+enum _Status {
+  Active,
+  Inactive,
+}
+type _StatusProps = { status: _Status };
+// expect-error: local enum resolved by name is always primitive
+const _StatusLabel = ({ status }: _StatusProps) => {
+  return <div>{status}</div>;
+};
+
+type _ID = string | number;
+type _IdProps = { id: _ID };
+// expect-error: local type alias resolving to a primitive is unwrapped
+const _IdLabel = ({ id }: _IdProps) => {
+  return <div>{id}</div>;
+};
+
+type _Config = { theme: string };
+type _ConfigProps = { title: string; config: _Config };
+// expect-ok: local object type alias member is not primitive
+const _ConfigLabel = ({ title, config }: _ConfigProps) => {
+  return (
+    <div>
+      {title}-{config.theme}
+    </div>
+  );
+};
+
+type _PairProps = { pair: [string, number] };
+// expect-ok: tuple types are never primitive
+const _PairLabel = ({ pair }: _PairProps) => {
+  return <div>{pair[0]}</div>;
+};
+
+type _DefaultValueProps = { title: string; count?: number };
+// expect-error: default value on a primitive-typed prop doesn't change the verdict
+const _DefaultValueLabel = ({ title, count = 0 }: _DefaultValueProps) => {
+  return (
+    <div>
+      {title}-{count}
+    </div>
+  );
+};

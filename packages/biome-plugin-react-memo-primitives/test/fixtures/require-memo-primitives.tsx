@@ -141,3 +141,46 @@ const AllPrimitiveMemoized = memo(({ title, count }: AllPrimitiveMemoOk) => {
     </h1>
   );
 });
+
+type NumberSpeakProps = {
+  title: JSX.Element | string;
+  locale: LocaleType;
+  historicalPerformance: HistoricalPerformance[];
+  hideCTA?: boolean;
+};
+// expect-ok: regression — array member and JSX.Element union member are both non-primitive
+const NumberSpeak = ({
+  hideCTA,
+  historicalPerformance,
+  locale,
+  title,
+}: NumberSpeakProps) => {
+  return <div>{title}</div>;
+};
+
+type NumberSpeakPropsMemo = {
+  title: string;
+  historicalPerformance: HistoricalPerformance[];
+};
+// expect-error: wrapped in memo but has an array-typed member — now disallowed
+const NumberSpeakMemoized = memo(
+  ({ historicalPerformance, title }: NumberSpeakPropsMemo) => {
+    return <div>{title}</div>;
+  },
+);
+
+type CompareRatesProps = { locale: LocaleType; variant?: "mica" | "trade" };
+// expect-error: locale (bare unresolved reference) trusted as primitive; default value on variant doesn't change the verdict
+const CompareRates = ({ locale, variant = "trade" }: CompareRatesProps) => {
+  return (
+    <div>
+      {locale}-{variant}
+    </div>
+  );
+};
+
+type PairProps = { pair: [string, number] };
+// expect-ok: tuple types are never primitive
+const PairLabel = ({ pair }: PairProps) => {
+  return <div>{pair[0]}</div>;
+};

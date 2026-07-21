@@ -173,13 +173,19 @@ plain `.jsx`, fall back to the naming heuristic described below.
 ## Limitations
 
 `require-memo-primitives` reads the destructured parameter's real TS type annotation when one is
-present (an inline object type, or a reference to a `type`/`interface` declared in the same
-file) to decide whether each prop is primitive. A type imported from another file, or a generic
-type alias, can't be resolved from a single file's AST and is conservatively treated as
-non-primitive. When there's no type annotation at all (plain JS/JSX), both rules fall back to a
-naming heuristic: a prop bound to a lowercase identifier (other than `props`) is treated as
-primitive regardless of its actual runtime value — there's no false-positive-proof way to do this
-without type information.
+present (an inline object type, or a reference to a `type`/`interface`/`enum` declared in the
+same file) to decide whether each prop is primitive. Objects, functions, arrays, tuples, and
+mapped types are always non-primitive. A named type reference resolved to a local `enum` is
+always primitive; resolved to a local object-shaped type it's non-primitive; resolved to a local
+primitive type alias it's unwrapped and checked recursively. A type that can't be resolved in the
+current file at all (imported from elsewhere, a generic parameter) falls back to a structural
+signal: a reference with type arguments (`MutableRefObject<T>`) is always non-primitive, while a
+bare reference with none (an imported enum or simple alias, e.g. `LocaleType`) is trusted as
+primitive — this is optimistic rather than conservative, since imported object-shaped type
+aliases with no generics are the uncommon case for prop types. When there's no type annotation at
+all (plain JS/JSX), both rules fall back to a naming heuristic: a prop bound to a lowercase
+identifier (other than `props`) is treated as primitive regardless of its actual runtime value —
+there's no false-positive-proof way to do this without type information.
 
 All three rules check that `memo`/`React` are actually imported from `'react'` in the same file,
 so a same-named identifier imported from elsewhere (`import { memo } from 'some-other-lib'`)

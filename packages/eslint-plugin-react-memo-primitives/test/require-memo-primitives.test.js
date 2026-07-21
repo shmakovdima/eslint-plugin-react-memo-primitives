@@ -220,3 +220,123 @@ tsRuleTester.run("require-memo-primitives (typed)", rule, {
     },
   ],
 });
+
+tsRuleTester.run("require-memo-primitives (typed, TS type-kind sweep)", rule, {
+  valid: [
+    // Regression: NumberSpeak — an array member and a JSX.Element union member are both
+    // non-primitive, so this must NOT be flagged as missing memo, unwrapped.
+    `
+    type Props = {
+      title: JSX.Element | string;
+      description: JSX.Element | string;
+      locale: LocaleType;
+      historicalPerformance: HistoricalPerformance[];
+      hideCTA?: boolean;
+    };
+    export const NumberSpeak = ({
+      description,
+      hideCTA,
+      historicalPerformance,
+      locale,
+      title,
+    }: Props) => {
+      return <div>{title}</div>;
+    };
+    `,
+    // A member typed as a local object type alias (not an inline literal, not an interface) is
+    // still non-primitive.
+    `
+    type Config = { theme: string };
+    type Props = { title: string; config: Config };
+    const MyComponent = ({ title, config }: Props) => {
+      return <div>{title}-{config.theme}</div>;
+    };
+    `,
+    // Tuple types are collections, never primitive.
+    `
+    type Props = { pair: [string, number] };
+    const MyComponent = ({ pair }: Props) => { return <div>{pair[0]}</div>; };
+    `,
+    // A mapped type member is object-shaped, never primitive.
+    `
+    type Keys = "a" | "b";
+    type Config = { [K in Keys]: string };
+    type Props = { title: string; config: Config };
+    const MyComponent = ({ title, config }: Props) => { return <div>{title}</div>; };
+    `,
+    // A default value on a non-primitive-typed destructured prop doesn't change the verdict.
+    `
+    type Props = { title: string; onClick?: () => void };
+    const MyComponent = ({ title, onClick = () => {} }: Props) => {
+      return <div onClick={onClick}>{title}</div>;
+    };
+    `,
+  ],
+  invalid: [
+    // Regression: a bare, unresolvable named type reference with no generic type arguments
+    // (LocaleType — the common shape of an imported enum or string alias) is trusted as
+    // primitive, not rejected outright the way an unresolvable *generic* reference is.
+    {
+      code: `
+      type Props = { locale: LocaleType; variant?: "mica" | "trade" };
+      const CompareRates = ({ locale, variant = "trade" }: Props) => {
+        return <div>{locale}-{variant}</div>;
+      };
+      `,
+      errors: [{ messageId: "missingMemo" }],
+    },
+    // A local `enum` declaration resolved by name in the same file is always primitive.
+    {
+      code: `
+      enum Status { Active, Inactive }
+      type Props = { status: Status };
+      const MyComponent = ({ status }: Props) => { return <div>{status}</div>; };
+      `,
+      errors: [{ messageId: "missingMemo" }],
+    },
+    // A local type alias to a primitive (not an object literal) is resolved and unwrapped.
+    {
+      code: `
+      type ID = string | number;
+      type Props = { id: ID };
+      const MyComponent = ({ id }: Props) => { return <div>{id}</div>; };
+      `,
+      errors: [{ messageId: "missingMemo" }],
+    },
+    // A default value on a primitive-typed destructured prop doesn't change the verdict.
+    {
+      code: `
+      type Props = { title: string; count?: number };
+      const MyComponent = ({ title, count = 0 }: Props) => {
+        return <div>{title}-{count}</div>;
+      };
+      `,
+      errors: [{ messageId: "missingMemo" }],
+    },
+    // NumberSpeak companion: memo-wrapped with the same array/JSX.Element non-primitive members
+    // must be actively flagged.
+    {
+      code: `
+      type Props = {
+        title: JSX.Element | string;
+        historicalPerformance: HistoricalPerformance[];
+      };
+      export const NumberSpeak = memo(({ historicalPerformance, title }: Props) => {
+        return <div>{title}</div>;
+      });
+      `,
+      errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
+    },
+    // Local object type alias member, memo-wrapped.
+    {
+      code: `
+      type Config = { theme: string };
+      type Props = { title: string; config: Config };
+      const MyComponent = memo(({ title, config }: Props) => {
+        return <div>{title}-{config.theme}</div>;
+      });
+      `,
+      errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
+    },
+  ],
+});

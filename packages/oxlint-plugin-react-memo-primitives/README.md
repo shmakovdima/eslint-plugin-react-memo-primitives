@@ -61,10 +61,15 @@ Or copy `.oxlintrc.json` from this package as a starting point.
 - oxlint's JS plugins have no access to a TypeScript type _checker_ (type-aware linting is a
   native-Rust-only capability in oxlint), but oxc parses `.tsx` type syntax natively, so
   `require-memo-primitives` reads it directly: an inline object type or a same-file
-  `type`/`interface` reference is resolved and each member's declared type is checked. A type
-  imported from elsewhere, or a generic type alias, can't be resolved from a single file's AST and
-  is conservatively treated as non-primitive. With no type annotation at all (plain JS/JSX), both
-  rules fall back to the naming heuristic: a prop typed only by its destructured binding name
+  `type`/`interface`/`enum` reference is resolved and each member's declared type is checked.
+  Objects, functions, arrays, tuples, and mapped types are always non-primitive; a reference
+  resolved to a local `enum` is always primitive, resolved to a local object-shaped type it's
+  non-primitive, resolved to a local primitive type alias it's unwrapped and checked recursively.
+  A type that can't be resolved in the current file at all (imported from elsewhere, a generic
+  parameter) falls back to a structural signal instead: a reference with type arguments
+  (`MutableRefObject<T>`) is always non-primitive, while a bare reference with none (an imported
+  enum or simple alias) is trusted as primitive. With no type annotation at all (plain JS/JSX),
+  both rules fall back to the naming heuristic: a prop typed only by its destructured binding name
   (lowercase, not literally `props`) is treated as primitive regardless of its actual value.
 - All three rules check that `memo`/`React` are actually imported from `'react'` in the same
   file, so a same-named identifier imported from elsewhere isn't mistaken for real memoization.

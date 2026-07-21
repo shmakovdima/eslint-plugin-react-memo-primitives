@@ -14,14 +14,27 @@ language js(jsx)
 // "Primitive" is determined two ways, since GritQL has no full type checker:
 //   - If the parameter has a TS type annotation (inline object type literal, or a reference to a
 //     local `type`/`interface` declaration resolved by name via $typename), each member's own
-//     type is inspected: it's non-primitive if it contains a TsObjectType (nested object shape),
-//     TsFunctionType, or TsReferenceType (an unresolvable named type, e.g. `MutableRefObject<T>`
-//     or `UseFormRegisterReturn<...>`) anywhere in it. This is deliberately conservative — a type
-//     alias that itself resolves to a primitive would be misclassified, but that's rare for prop
-//     types. `TsObjectType()`/`TsFunctionType()`/`TsReferenceType()` are only checked via a
-//     `` `: $member` `` sub-pattern (never directly against the type body itself) because
-//     `$typebody <: not contains TsObjectType()` is always false when `$typebody` IS a
-//     TsObjectType — a documented self-containment trap (see README limitations).
+//     type is inspected. A member is non-primitive if it contains any of:
+//       - TsObjectType (nested object shape)
+//       - TsFunctionType
+//       - TsArrayType / TsTupleType (collections — identity-sensitive even with primitive
+//         elements)
+//       - TsMappedType (object-shaped)
+//       - TsReferenceType WITH type arguments (a generic instantiation, e.g.
+//         `MutableRefObject<T>`, `Promise<T>` — no real primitive type takes type arguments, so
+//         this is always a wrapper)
+//     A *bare* TsReferenceType with no type arguments (`LocaleType`, `Status`) that can't be
+//     resolved to a local declaration is trusted as primitive (the common case: an imported enum
+//     or string/number alias) — see README limitations for why this can't reliably resolve a
+//     bare reference to a local declaration when the type has more than one member (a confirmed
+//     GritQL bug: `contains` binds to the first structural match in source order and does not
+//     backtrack to try other members if a later `where` clause fails to join against that first
+//     match — so a mapped/array *type alias referenced by name* elsewhere in the props type can
+//     slip through as "trusted primitive" if an earlier member's reference doesn't resolve).
+//     `TsObjectType()`/`TsFunctionType()`/etc. are only checked via a `` `: $member` `` sub-pattern
+//     (never directly against the type body itself) because `$typebody <: not contains
+//     TsObjectType()` is always false when `$typebody` IS a TsObjectType — a documented
+//     self-containment trap (see README limitations).
 //   - If there's no type annotation at all (plain JS/JSX), rule 1 falls back to the pre-1.2.0
 //     heuristic: any destructured object pattern counts as primitive-props, no per-property
 //     inspection at all (see README limitations re: nested object/array sub-patterns like
@@ -36,7 +49,7 @@ language js(jsx)
 // these patterns to begin with. That's what makes "not wrapped in memo" implicit for those
 // alternatives, instead of an explicit `not contains` check on the component.
 //
-// Rule 1's last two alternatives (and rule 2's shadowed-import alternatives) cover the
+// Rule 1's last three alternatives (and rule 2's shadowed-import alternatives) cover the
 // shadowed-import case: `const Foo = memo(($props) => ...)` *looks* memo-wrapped, but if
 // `memo`/`React` in this file is provably imported from somewhere other than `'react'`, it isn't
 // real memoization — the same case the ESLint/oxlint versions handle via
@@ -58,18 +71,38 @@ or {
           $badmember2 <: contains TsFunctionType()
         },
         not $typebody <: contains `: $badmember3` where {
-          $badmember3 <: contains TsReferenceType()
+          $badmember3 <: contains TsArrayType()
+        },
+        not $typebody <: contains `: $badmember4` where {
+          $badmember4 <: contains TsTupleType()
+        },
+        not $typebody <: contains `: $badmember5` where {
+          $badmember5 <: contains TsMappedType()
+        },
+        not $typebody <: contains `: $badmember6` where {
+          $badmember6 <: contains TsReferenceType() as $ref6,
+          $ref6 <: contains TsTypeArguments()
         }
       },
       $props <: contains TsObjectType() as $inlinetype where {
-        not $inlinetype <: contains `: $badmember4` where {
-          $badmember4 <: contains TsObjectType()
+        not $inlinetype <: contains `: $badmember7` where {
+          $badmember7 <: contains TsObjectType()
         },
-        not $inlinetype <: contains `: $badmember5` where {
-          $badmember5 <: contains TsFunctionType()
+        not $inlinetype <: contains `: $badmember8` where {
+          $badmember8 <: contains TsFunctionType()
         },
-        not $inlinetype <: contains `: $badmember6` where {
-          $badmember6 <: contains TsReferenceType()
+        not $inlinetype <: contains `: $badmember9` where {
+          $badmember9 <: contains TsArrayType()
+        },
+        not $inlinetype <: contains `: $badmember10` where {
+          $badmember10 <: contains TsTupleType()
+        },
+        not $inlinetype <: contains `: $badmember11` where {
+          $badmember11 <: contains TsMappedType()
+        },
+        not $inlinetype <: contains `: $badmember12` where {
+          $badmember12 <: contains TsReferenceType() as $ref12,
+          $ref12 <: contains TsTypeArguments()
         }
       },
       not $props <: contains `: $anytype`
@@ -93,18 +126,38 @@ or {
           $badmember2 <: contains TsFunctionType()
         },
         not $typebody <: contains `: $badmember3` where {
-          $badmember3 <: contains TsReferenceType()
+          $badmember3 <: contains TsArrayType()
+        },
+        not $typebody <: contains `: $badmember4` where {
+          $badmember4 <: contains TsTupleType()
+        },
+        not $typebody <: contains `: $badmember5` where {
+          $badmember5 <: contains TsMappedType()
+        },
+        not $typebody <: contains `: $badmember6` where {
+          $badmember6 <: contains TsReferenceType() as $ref6,
+          $ref6 <: contains TsTypeArguments()
         }
       },
       $props <: contains TsObjectType() as $inlinetype where {
-        not $inlinetype <: contains `: $badmember4` where {
-          $badmember4 <: contains TsObjectType()
+        not $inlinetype <: contains `: $badmember7` where {
+          $badmember7 <: contains TsObjectType()
         },
-        not $inlinetype <: contains `: $badmember5` where {
-          $badmember5 <: contains TsFunctionType()
+        not $inlinetype <: contains `: $badmember8` where {
+          $badmember8 <: contains TsFunctionType()
         },
-        not $inlinetype <: contains `: $badmember6` where {
-          $badmember6 <: contains TsReferenceType()
+        not $inlinetype <: contains `: $badmember9` where {
+          $badmember9 <: contains TsArrayType()
+        },
+        not $inlinetype <: contains `: $badmember10` where {
+          $badmember10 <: contains TsTupleType()
+        },
+        not $inlinetype <: contains `: $badmember11` where {
+          $badmember11 <: contains TsMappedType()
+        },
+        not $inlinetype <: contains `: $badmember12` where {
+          $badmember12 <: contains TsReferenceType() as $ref12,
+          $ref12 <: contains TsTypeArguments()
         }
       },
       not $props <: contains `: $anytype`
@@ -128,18 +181,38 @@ or {
           $badmember2 <: contains TsFunctionType()
         },
         not $typebody <: contains `: $badmember3` where {
-          $badmember3 <: contains TsReferenceType()
+          $badmember3 <: contains TsArrayType()
+        },
+        not $typebody <: contains `: $badmember4` where {
+          $badmember4 <: contains TsTupleType()
+        },
+        not $typebody <: contains `: $badmember5` where {
+          $badmember5 <: contains TsMappedType()
+        },
+        not $typebody <: contains `: $badmember6` where {
+          $badmember6 <: contains TsReferenceType() as $ref6,
+          $ref6 <: contains TsTypeArguments()
         }
       },
       $props <: contains TsObjectType() as $inlinetype where {
-        not $inlinetype <: contains `: $badmember4` where {
-          $badmember4 <: contains TsObjectType()
+        not $inlinetype <: contains `: $badmember7` where {
+          $badmember7 <: contains TsObjectType()
         },
-        not $inlinetype <: contains `: $badmember5` where {
-          $badmember5 <: contains TsFunctionType()
+        not $inlinetype <: contains `: $badmember8` where {
+          $badmember8 <: contains TsFunctionType()
         },
-        not $inlinetype <: contains `: $badmember6` where {
-          $badmember6 <: contains TsReferenceType()
+        not $inlinetype <: contains `: $badmember9` where {
+          $badmember9 <: contains TsArrayType()
+        },
+        not $inlinetype <: contains `: $badmember10` where {
+          $badmember10 <: contains TsTupleType()
+        },
+        not $inlinetype <: contains `: $badmember11` where {
+          $badmember11 <: contains TsMappedType()
+        },
+        not $inlinetype <: contains `: $badmember12` where {
+          $badmember12 <: contains TsReferenceType() as $ref12,
+          $ref12 <: contains TsTypeArguments()
         }
       },
       not $props <: contains `: $anytype`
@@ -190,32 +263,54 @@ or {
       $props <: contains `: $typename` where {
         $program <: contains `type $typename = $typebody`,
         or {
-          $typebody <: contains `: $badmember7` where { $badmember7 <: contains TsObjectType() },
-          $typebody <: contains `: $badmember8` where {
-            $badmember8 <: contains TsFunctionType()
+          $typebody <: contains `: $badmember13` where {
+            $badmember13 <: contains TsObjectType()
           },
-          $typebody <: contains `: $badmember9` where {
-            $badmember9 <: contains TsReferenceType()
+          $typebody <: contains `: $badmember14` where {
+            $badmember14 <: contains TsFunctionType()
+          },
+          $typebody <: contains `: $badmember15` where {
+            $badmember15 <: contains TsArrayType()
+          },
+          $typebody <: contains `: $badmember16` where {
+            $badmember16 <: contains TsTupleType()
+          },
+          $typebody <: contains `: $badmember17` where {
+            $badmember17 <: contains TsMappedType()
+          },
+          $typebody <: contains `: $badmember18` where {
+            $badmember18 <: contains TsReferenceType() as $ref18,
+            $ref18 <: contains TsTypeArguments()
           }
         }
       },
       $props <: contains TsObjectType() as $inlinetype2 where {
         or {
-          $inlinetype2 <: contains `: $badmember10` where {
-            $badmember10 <: contains TsObjectType()
+          $inlinetype2 <: contains `: $badmember19` where {
+            $badmember19 <: contains TsObjectType()
           },
-          $inlinetype2 <: contains `: $badmember11` where {
-            $badmember11 <: contains TsFunctionType()
+          $inlinetype2 <: contains `: $badmember20` where {
+            $badmember20 <: contains TsFunctionType()
           },
-          $inlinetype2 <: contains `: $badmember12` where {
-            $badmember12 <: contains TsReferenceType()
+          $inlinetype2 <: contains `: $badmember21` where {
+            $badmember21 <: contains TsArrayType()
+          },
+          $inlinetype2 <: contains `: $badmember22` where {
+            $badmember22 <: contains TsTupleType()
+          },
+          $inlinetype2 <: contains `: $badmember23` where {
+            $badmember23 <: contains TsMappedType()
+          },
+          $inlinetype2 <: contains `: $badmember24` where {
+            $badmember24 <: contains TsReferenceType() as $ref24,
+            $ref24 <: contains TsTypeArguments()
           }
         }
       }
     },
     register_diagnostic(
       span = $name,
-      message = "Component with a non-primitive prop (object, function, ref, or other unresolvable type) should not be wrapped in React.memo",
+      message = "Component with a non-primitive prop (object, function, ref, array, tuple, mapped type, or other unresolvable generic type) should not be wrapped in React.memo",
       severity = "error"
     )
   },
@@ -227,32 +322,54 @@ or {
       $props <: contains `: $typename` where {
         $program <: contains `type $typename = $typebody`,
         or {
-          $typebody <: contains `: $badmember7` where { $badmember7 <: contains TsObjectType() },
-          $typebody <: contains `: $badmember8` where {
-            $badmember8 <: contains TsFunctionType()
+          $typebody <: contains `: $badmember13` where {
+            $badmember13 <: contains TsObjectType()
           },
-          $typebody <: contains `: $badmember9` where {
-            $badmember9 <: contains TsReferenceType()
+          $typebody <: contains `: $badmember14` where {
+            $badmember14 <: contains TsFunctionType()
+          },
+          $typebody <: contains `: $badmember15` where {
+            $badmember15 <: contains TsArrayType()
+          },
+          $typebody <: contains `: $badmember16` where {
+            $badmember16 <: contains TsTupleType()
+          },
+          $typebody <: contains `: $badmember17` where {
+            $badmember17 <: contains TsMappedType()
+          },
+          $typebody <: contains `: $badmember18` where {
+            $badmember18 <: contains TsReferenceType() as $ref18,
+            $ref18 <: contains TsTypeArguments()
           }
         }
       },
       $props <: contains TsObjectType() as $inlinetype2 where {
         or {
-          $inlinetype2 <: contains `: $badmember10` where {
-            $badmember10 <: contains TsObjectType()
+          $inlinetype2 <: contains `: $badmember19` where {
+            $badmember19 <: contains TsObjectType()
           },
-          $inlinetype2 <: contains `: $badmember11` where {
-            $badmember11 <: contains TsFunctionType()
+          $inlinetype2 <: contains `: $badmember20` where {
+            $badmember20 <: contains TsFunctionType()
           },
-          $inlinetype2 <: contains `: $badmember12` where {
-            $badmember12 <: contains TsReferenceType()
+          $inlinetype2 <: contains `: $badmember21` where {
+            $badmember21 <: contains TsArrayType()
+          },
+          $inlinetype2 <: contains `: $badmember22` where {
+            $badmember22 <: contains TsTupleType()
+          },
+          $inlinetype2 <: contains `: $badmember23` where {
+            $badmember23 <: contains TsMappedType()
+          },
+          $inlinetype2 <: contains `: $badmember24` where {
+            $badmember24 <: contains TsReferenceType() as $ref24,
+            $ref24 <: contains TsTypeArguments()
           }
         }
       }
     },
     register_diagnostic(
       span = $name,
-      message = "Component with a non-primitive prop (object, function, ref, or other unresolvable type) should not be wrapped in React.memo",
+      message = "Component with a non-primitive prop (object, function, ref, array, tuple, mapped type, or other unresolvable generic type) should not be wrapped in React.memo",
       severity = "error"
     )
   }

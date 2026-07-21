@@ -79,11 +79,16 @@ function looksLikeMemoCallExpression(node) {
 function hasOnlyPrimitiveNames(objectPattern) {
   return objectPattern.properties.every((prop) => {
     if (prop.type === "RestElement") return false;
+    if (prop.type !== "Property") return false;
+    // `{ variant = 'trade' }` destructures as Property.value.type === "AssignmentPattern"
+    // (value.left is the actual binding) — a default value alone doesn't make the prop
+    // non-primitive.
+    const binding =
+      prop.value.type === "AssignmentPattern" ? prop.value.left : prop.value;
     return (
-      prop.type === "Property" &&
-      prop.value.type === "Identifier" &&
-      prop.value.name[0] === prop.value.name[0].toLowerCase() &&
-      prop.value.name !== "props"
+      binding.type === "Identifier" &&
+      binding.name[0] === binding.name[0].toLowerCase() &&
+      binding.name !== "props"
     );
   });
 }
@@ -104,49 +109,134 @@ const PRIMITIVE_TS_TYPE_KINDS = new Set([
 ]);
 
 /**
- * Recursively classifies a TS type node as primitive-or-not. Unions (`string | undefined`) are
- * primitive only if every member is. Named type references (`LocaleType`, `MutableRefObject<T>`)
- * can't be resolved to their definition from a single file's AST without a full type checker, so
- * they're conservatively treated as non-primitive — this only matters for local type aliases that
- * themselves resolve to a primitive, which is rare for prop types and safe to require memo for.
+ * TS type-node kinds that are always non-primitive regardless of contents — listed explicitly
+ * (rather than relying on the final `return false` fallthrough) so a future refactor of
+ * isPrimitiveTsType can't accidentally start treating one of these as primitive without a test
+ * catching it. Arrays/tuples are collections (identity-sensitive even when their elements are
+ * primitive), object/mapped/function types are obviously non-primitive.
  */
-function isPrimitiveTsType(typeNode) {
+const NON_PRIMITIVE_TS_TYPE_KINDS = new Set([
+  "TSArrayType",
+  "TSTupleType",
+  "TSTypeLiteral",
+  "TSMappedType",
+  "TSFunctionType",
+  "TSConstructorType",
+  "TSIndexedAccessType",
+  "TSConditionalType",
+]);
+
+/**
+ * Recursively classifies a TS type node as primitive-or-not. Unions (`string | undefined`) are
+ * primitive only if every member is. A `TSTypeReference` (`LocaleType`, `MutableRefObject<T>`)
+ * is resolved against local declarations in the same file (object-shaped ones are handled by
+ * getObjectPatternMemberTypes/hasOnlyPrimitiveProps directly; this function handles a reference
+ * that shows up as a *member's* type, e.g. `age: SomeEnum`):
+ *   - A local `enum` is always primitive (TS enums compile to string/number values, never
+ *     objects/functions).
+ *   - A local type alias that itself resolves to a primitive is unwrapped and checked
+ *     recursively.
+ *   - A local object-shaped declaration (interface / object type alias) is never primitive.
+ *   - Anything unresolvable from this file (imported type, global, generic parameter) falls back
+ *     to a structural signal instead of a blanket default: a reference WITH type arguments
+ *     (`MutableRefObject<T>`, `Promise<T>`, `Record<K, V>`) is a generic wrapper and is never
+ *     primitive — no real primitive type takes type arguments. A bare reference with no type
+ *     arguments (`LocaleType`, `Status`) is far more likely to be an imported enum or simple
+ *     string/number alias (the overwhelmingly common case for prop types), so it's trusted as
+ *     primitive. This isn't foolproof (an imported object-shaped type alias with no generics,
+ *     e.g. `type Config = { theme: string }` imported from elsewhere, would be misclassified),
+ *     but it fixes the common real-world case (enums imported from a shared types file) without
+ *     reintroducing the original bug (ref/handler objects wrongly treated as primitive) — see
+ *     the two regression tests for each direction in require-memo-primitives.test.js.
+ */
+function isPrimitiveTsType(typeNode, programNode) {
   if (!typeNode) return false;
   if (PRIMITIVE_TS_TYPE_KINDS.has(typeNode.type)) return true;
+  if (NON_PRIMITIVE_TS_TYPE_KINDS.has(typeNode.type)) return false;
   if (typeNode.type === "TSParenthesizedType") {
-    return isPrimitiveTsType(typeNode.typeAnnotation);
+    return isPrimitiveTsType(typeNode.typeAnnotation, programNode);
   }
   if (
     typeNode.type === "TSUnionType" ||
     typeNode.type === "TSIntersectionType"
   ) {
-    return typeNode.types.every(isPrimitiveTsType);
+    return typeNode.types.every((member) =>
+      isPrimitiveTsType(member, programNode),
+    );
+  }
+  if (
+    typeNode.type === "TSTypeReference" &&
+    typeNode.typeName.type === "Identifier" &&
+    programNode
+  ) {
+    const resolved = resolveLocalTypeDeclaration(
+      programNode,
+      typeNode.typeName.name,
+    );
+    if (resolved === null) {
+      // Unresolvable in this file — trust a bare reference as primitive (likely enum/alias),
+      // but never a generic instantiation (always a wrapper type, e.g. MutableRefObject<T>).
+      return typeNode.typeArguments == null;
+    }
+    if (resolved.kind === "enum") return true;
+    if (resolved.kind === "primitive-alias") {
+      return isPrimitiveTsType(resolved.typeNode, programNode);
+    }
+    // resolved.kind === "object" (interface / object type alias) — a nested object-shaped
+    // member is never primitive.
+    return false;
   }
   return false;
 }
 
 /**
- * Finds a top-level `interface Foo { ... }` or `type Foo = { ... }` declaration by name in the
- * Program body, returning its member list (TSPropertySignature[]) or null if not found / not an
- * object-shaped type (e.g. `type Foo = string` or a type imported from elsewhere).
+ * Resolves a type name to a local declaration in the Program body, returning a discriminated
+ * result so callers can tell "resolved, and it's this shape" apart from "not declared in this
+ * file at all" (imported type, global, or a type this function doesn't recognize):
+ *   - `{ kind: "enum" }` for `enum Foo { ... }` — always primitive at the value level.
+ *   - `{ kind: "object", members }` for `interface Foo {...}` / `type Foo = {...}` — inspected
+ *     member-by-member by the caller.
+ *   - `{ kind: "primitive-alias", typeNode }` for `type Foo = <non-object type>` (e.g.
+ *     `type Foo = string | number`) — the caller recurses into typeNode.
+ *   - `null` when no matching declaration exists in this file at all.
  */
-function resolveLocalTypeMembers(programNode, typeName) {
+function resolveLocalTypeDeclaration(programNode, typeName) {
   for (const statement of programNode.body) {
+    if (
+      statement.type === "TSEnumDeclaration" &&
+      statement.id.name === typeName
+    ) {
+      return { kind: "enum" };
+    }
     if (
       statement.type === "TSInterfaceDeclaration" &&
       statement.id.name === typeName
     ) {
-      return statement.body.body;
+      return { kind: "object", members: statement.body.body };
     }
     if (
       statement.type === "TSTypeAliasDeclaration" &&
-      statement.id.name === typeName &&
-      statement.typeAnnotation.type === "TSTypeLiteral"
+      statement.id.name === typeName
     ) {
-      return statement.typeAnnotation.members;
+      if (statement.typeAnnotation.type === "TSTypeLiteral") {
+        return { kind: "object", members: statement.typeAnnotation.members };
+      }
+      return { kind: "primitive-alias", typeNode: statement.typeAnnotation };
     }
   }
   return null;
+}
+
+/**
+ * Finds a top-level `interface Foo { ... }` or `type Foo = { ... }` declaration by name in the
+ * Program body, returning its member list (TSPropertySignature[]) or null if not found / not an
+ * object-shaped type (e.g. `type Foo = string`, `enum Foo {...}`, or a type imported from
+ * elsewhere) — callers treat null as "not an object shape in this file," not "non-primitive";
+ * see getObjectPatternMemberTypes for how that distinction is used.
+ */
+function resolveLocalTypeMembers(programNode, typeName) {
+  const resolved = resolveLocalTypeDeclaration(programNode, typeName);
+  return resolved?.kind === "object" ? resolved.members : null;
 }
 
 /**
@@ -198,24 +288,29 @@ function hasOnlyPrimitiveProps(objectPattern, programNode) {
 
   return objectPattern.properties.every((prop) => {
     if (prop.type === "RestElement") return false;
-    if (
-      prop.type !== "Property" ||
-      prop.value.type !== "Identifier" ||
-      prop.key.type !== "Identifier"
-    ) {
+    if (prop.type !== "Property" || prop.key.type !== "Identifier") {
       return false;
     }
+
+    // `{ variant = 'trade' }` destructures as Property.value.type === "AssignmentPattern"
+    // (value.left is the actual binding) — a default value doesn't make the prop non-primitive,
+    // so unwrap it before checking the binding shape. A nested destructure with a default
+    // (`{ config = {} }`) still correctly falls through to `return false` below, since
+    // `left.type` would be "ObjectPattern", not "Identifier".
+    const binding =
+      prop.value.type === "AssignmentPattern" ? prop.value.left : prop.value;
+    if (binding.type !== "Identifier") return false;
 
     const declaredType = typesByName.get(prop.key.name);
     if (declaredType === undefined) {
       // No matching member found in the resolved type (e.g. index signature, computed key) —
       // fall back to the naming heuristic for just this property.
       return (
-        prop.value.name[0] === prop.value.name[0].toLowerCase() &&
-        prop.value.name !== "props"
+        binding.name[0] === binding.name[0].toLowerCase() &&
+        binding.name !== "props"
       );
     }
-    return isPrimitiveTsType(declaredType);
+    return isPrimitiveTsType(declaredType, programNode);
   });
 }
 

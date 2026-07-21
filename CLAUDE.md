@@ -46,18 +46,45 @@ the logic is small.
 
 None of the three linter APIs expose a real TypeScript type _checker_ to a lint rule (no
 cross-file type resolution), but as of 1.2.0 all three read a component's actual TS type
-_syntax_ when it's present, instead of guessing from the destructured binding's name: a prop is
-"primitive" only if its declared type is `string`/`number`/`boolean`/`bigint`/`null`/`undefined`/
-`void`/a literal type, or a union/intersection of only those. A prop typed as a function
-(`TsFunctionType`/`TSFunctionType`), an inline object shape (`TsObjectType`/`TSTypeLiteral`), or
-an unresolvable named type reference (`TsReferenceType`/`TSTypeReference` — e.g.
-`MutableRefObject<T>`, `UseFormRegisterReturn<...>`) makes the whole component **not** require
-memo, since not all its props are primitive. Named local type aliases/interfaces
-(`type Props = {...}` / `interface Props {...}` in the same file) are resolved by name; imported
-or generic type aliases can't be resolved from a single file's AST and are conservatively treated
-as non-primitive. The old binding-name heuristic (lowercase first letter, not literally `props`)
-is now only a _fallback_ used when there's no type annotation at all (plain JS/JSX) — see each
-package's section below for how each reads TS type syntax.
+_syntax_ when it's present, instead of guessing from the destructured binding's name. A prop's
+declared type is classified as primitive/non-primitive as follows:
+
+- **Always primitive**: `string`/`number`/`boolean`/`bigint`/`null`/`undefined`/`void`, a literal
+  type, a template literal type, or a union/intersection of only those.
+- **Always non-primitive**: an object type (`TsObjectType`/`TSTypeLiteral`), a function type
+  (`TsFunctionType`/`TSFunctionType`), an array type (`TsArrayType`/`TSArrayType`), a tuple type
+  (`TsTupleType`/`TSTupleType`), or a mapped type (`TsMappedType`/`TSMappedType`) — collections and
+  functions are never primitive even when their contents are (an array of strings is still an
+  object by identity).
+- **A named type reference** (`TsReferenceType`/`TSTypeReference`, e.g. `LocaleType`,
+  `MutableRefObject<T>`) is resolved against local declarations in the same file, in order of
+  priority: a local `enum` (`TSEnumDeclaration`/`TsEnumDeclaration`) is always primitive (TS enums
+  compile to string/number values); a local `interface`/object-shaped `type` alias is non-primitive
+  (object shape); a local `type` alias to a non-object type (e.g. `type ID = string | number`) is
+  unwrapped and its RHS is classified recursively. **If the reference can't be resolved in this
+  file at all** (imported type, global, generic type parameter — the common real-world case, e.g.
+  an enum imported from a shared types file), it falls back to a structural signal instead of a
+  blanket default: a reference **with type arguments** (`MutableRefObject<T>`, `Promise<T>`,
+  `Record<K, V>`) is always non-primitive (no real primitive type takes type arguments), while a
+  **bare** reference with no type arguments (`LocaleType`, `Status`) is trusted as primitive — this
+  is deliberately optimistic (an imported object-shaped type alias with no generics would be
+  misclassified as primitive) but fixes the common case of enums/simple aliases imported from a
+  shared types file. **This exact trade-off was hardened through two real false-positive reports
+  in production use**, not just designed upfront — see the extensive regression coverage in each
+  package's tests for the full sweep of cases (enum, imported bare reference, generic reference,
+  nested object alias, array, tuple, mapped type, JSX.Element as a qualified-name reference,
+  destructuring default values).
+- Destructuring a prop with a **default value** (`{ variant = 'trade' }`) represents the binding
+  as `Property.value.type === "AssignmentPattern"` (`value.left` is the real binding) in
+  ESLint/oxlint's ASTs — unwrap it before checking the binding shape, or every prop with a default
+  value gets misclassified as non-primitive regardless of its actual type. GritQL's
+  `JsObjectBindingPattern` structural matcher handles default values natively, no equivalent fix
+  needed in the Biome package.
+- When there's no type annotation at all (plain JS/JSX), all three fall back to the pre-1.2.0
+  naming heuristic (lowercase first letter, not literally `props`) — see each package's section
+  below for how each reads TS type syntax, and for Biome's narrower coverage (GritQL can't reliably
+  resolve a bare reference to a local declaration when there's more than one prop — see that
+  section).
 
 `memo` detection recognizes both a bare `memo(...)` call (`import { memo } from 'react'`) and
 `React.memo(...)` (member expression) — keep both forms in sync across all three implementations
@@ -104,17 +131,27 @@ Plain CommonJS, no build step. `lib/utils.js` holds the shared AST-walking helpe
 `typeAnnotation` (present when parsed with `@typescript-eslint/parser`, a `dependencies` entry so
 consumers get it transitively): a `TSTypeLiteral` is used directly, a `TSTypeReference` is
 resolved to a same-file `TSInterfaceDeclaration`/`TSTypeAliasDeclaration` by name via
-`resolveLocalTypeMembers()`. Each member's type is classified by `isPrimitiveTsType()` — string/
-number/boolean/bigint/null/undefined/void/literal types, or unions/intersections of only those.
-When there's no type annotation, or the reference can't be resolved (imported/generic type),
-`hasOnlyPrimitiveNames()` — the original lowercase-first-letter/not-literally-`props` naming
-heuristic — is used as a fallback for that property, preserving pre-1.2.0 behavior for plain
-JS/JSX. Regression coverage for this lives in `test/require-memo-primitives.test.js`'s
-`tsRuleTester` block (a second `RuleTester` configured with `@typescript-eslint/parser`),
-including the exact false-positive report that motivated the change: a component whose props are
-mostly primitives but include a `MutableRefObject<T>` ref and a `() => void` handler must NOT be
-flagged. Tests: `test/*.test.js`, using ESLint's `RuleTester`, run via `npm test`
-(`node --test test/`).
+`resolveLocalTypeMembers()`. Each member's type is classified by `isPrimitiveTsType()` per the
+rules in the section above — `PRIMITIVE_TS_TYPE_KINDS`/`NON_PRIMITIVE_TS_TYPE_KINDS` Sets list the
+always-primitive/always-non-primitive node kinds explicitly (rather than relying on a fallthrough
+default) specifically so a future edit can't silently misclassify one without a test catching it;
+`resolveLocalTypeDeclaration()` handles the `enum`/object-alias/primitive-alias/unresolvable-name
+resolution, returning a discriminated `{ kind: ... }` result so callers can tell "resolved to this
+shape" apart from "not declared in this file." When there's no type annotation, `hasOnlyPrimitiveNames()`
+— the original lowercase-first-letter/not-literally-`props` naming heuristic — is used as a
+fallback for that property, preserving pre-1.2.0 behavior for plain JS/JSX; both this function and
+`hasOnlyPrimitiveProps` unwrap a `Property.value.type === "AssignmentPattern"` (a destructured
+default value, e.g. `{ variant = 'trade' }`) to its `.left` binding before checking the shape —
+without this, every prop with a default value is misclassified as non-primitive regardless of its
+actual type. Regression coverage lives in `test/require-memo-primitives.test.js`'s `tsRuleTester`
+blocks (a second `RuleTester` configured with `@typescript-eslint/parser`), including every false
+positive/negative actually reported in production use: a `MutableRefObject<T>` ref alongside
+primitive props (must NOT require memo unwrapped, must actively flag memo when wrapped); a bare
+unresolved `LocaleType` reference with a defaulted sibling prop (must require memo); an array
+member + a `JSX.Element` union member (must NOT require memo); a local `enum` and a local
+primitive type alias (must require memo); a local object-shaped type alias member and a tuple
+type (must NOT require memo). Tests: `test/*.test.js`, using ESLint's `RuleTester`, run via
+`npm test` (`node --test test/`).
 
 ### `packages/biome-plugin-react-memo-primitives`
 
@@ -126,15 +163,31 @@ directions (missing-memo and unnecessary-memo-on-non-primitive) both live inside
 comment for why (this is also what a per-file, single-top-level-pattern GritQL file requires in
 general: two logically distinct checks that need separate diagnostics can't be split into two
 top-level patterns in the same `.grit` file, confirmed by a compile error when tried). GritQL has
-no type _checker_, but it does parse TS
-syntax, and since 1.2.0 `require-memo-primitives.grit` reads it: when the destructured parameter
-has a TS type annotation (inline `TsObjectType` literal, or a `` `: $typename` `` reference
-resolved to a same-file `` `type $typename = $typebody` `` by reusing the metavariable name as a
-join key), each member is rejected as non-primitive if its own `` `: $member` `` annotation
-contains a `TsObjectType` (nested object shape), `TsFunctionType`, or `TsReferenceType`
-(unresolvable named type, e.g. `MutableRefObject<T>`) anywhere in it. With no type annotation at
-all (plain JS/JSX), it falls back to the pre-1.2.0 coarse check: any destructured object pattern
-at all (`JsObjectBindingPattern`) counts as primitive-props, with no per-property inspection.
+no type _checker_, but it does parse TS syntax, and since 1.2.0 `require-memo-primitives.grit`
+reads it: when the destructured parameter has a TS type annotation (inline `TsObjectType`
+literal, or a `` `: $typename` `` reference resolved to a same-file `` `type $typename =
+$typebody` `` by reusing the metavariable name as a join key), each member is rejected as
+non-primitive if its own `` `: $member` `` annotation contains, anywhere in it: `TsObjectType`
+(nested object shape), `TsFunctionType`, `TsArrayType`, `TsTupleType`, `TsMappedType`, or a
+`TsReferenceType` that itself contains `TsTypeArguments` (a generic instantiation, e.g.
+`MutableRefObject<T>` — a bare reference with no type arguments, e.g. `LocaleType`, is trusted as
+primitive; see the file comment and the primitive-detection section above for why). With no type
+annotation at all (plain JS/JSX), it falls back to the pre-1.2.0 coarse check: any destructured
+object pattern at all (`JsObjectBindingPattern`) counts as primitive-props, with no per-property
+inspection. GritQL's `JsObjectBindingPattern` matches a destructure with a default value
+(`{ variant = 'trade' }`) natively — no equivalent to ESLint's `AssignmentPattern`-unwrap fix was
+needed here.
+
+**Known gap, not fixed**: unlike ESLint/oxlint, this package does **not** attempt to resolve a
+bare `TsReferenceType` member to a local `enum`/`interface`/`type` declaration by name (e.g.
+`status: Status` where `enum Status {...}` is declared in the same file) — it always trusts a bare
+unresolvable-looking reference as primitive regardless of whether it happens to match a local
+declaration. This is a deliberate simplification, not an oversight: attempting it surfaced a
+previously-undocumented GritQL bug (see syntax notes below) where resolving an arbitrary member's
+type name via a join key is order-dependent and silently fails when the resolving member isn't
+the first one Biome's `contains` happens to structurally match. A locally-declared mapped/array
+type referenced by name (not inline) can therefore slip through as "trusted primitive" in this
+package specifically — see README limitations.
 
 Hard-won GritQL syntax notes (Biome 2.5.4 — re-verify against the installed version if these stop
 working, since the docs themselves warn the grammar changes between releases):
@@ -166,11 +219,31 @@ JsObjectBindingPattern()` in a `where` clause.
   silently compile to zero matches even when each one works in isolation — always scope the
   `contains` check to the narrowest sub-pattern that could actually match the excluded kind, not
   to a variable that might BE that kind.
-- `TsObjectType()`, `TsFunctionType()`, `TsReferenceType()`, `TsStringType()`, `TsNumberType()`,
-  `TsBooleanType()`, `TsUndefinedType()`, `TsVoidType()` are the real TS type-node kind names
-  (verified by probing with `register_diagnostic` against known snippets — same "PascalCase
+- `TsObjectType()`, `TsFunctionType()`, `TsReferenceType()`, `TsArrayType()`, `TsTupleType()`,
+  `TsMappedType()`, `TsTypeArguments()`, `TsEnumDeclaration()` are the real TS type-node kind
+  names (verified by probing with `register_diagnostic` against known snippets — same "PascalCase
   Biome-internal name, not the docs' snake_case" gotcha as the JS node kinds above applies to TS
-  nodes too).
+  nodes too). **Correction to an earlier version of this doc**: the primitive-keyword names are
+  `TsStringType()`/`TsNumberType()`/`TsBooleanType()`/`TsUndefinedType()`/`TsVoidType()`/
+  `TsBigintType()`/`TsAnyType()`/`TsTemplateLiteralType()` (suffix `Type`, not the previously
+  (incorrectly) documented `Keyword`) — `TsStringKeyword()` etc. fail to compile. `TsNullType()`
+  and `TsLiteralType()` (any spelling tried) also fail to compile — no working name was found for
+  these two; they were never actually needed in the shipped `.grit` files since this package only
+  ever checks for non-primitive kinds by name (object/function/array/tuple/mapped/reference), never
+  asserts a primitive kind by name, so this gap doesn't block anything currently implemented.
+- **`contains` binds to the first structural match in source order and does not backtrack** if a
+  later `where` clause fails to join against that specific match — confirmed by testing ``$typebody
+<: contains `: $membertype` where { $program <: contains `type $membertype = $resolved` }``
+  against a type with two members where only the _second_ member's type name resolves locally:
+  the pattern fails to match at all, because `contains` grabs the _first_ member (`$membertype`
+  bound to the first member's type, e.g. `string`) and the `where` join against that fails — it
+  never retries against the second member even though the whole pattern would succeed if member
+  order were reversed. Reordering the members in the fixture changes whether the pattern matches,
+  which is the tell. This means "resolve any member's type name against a local declaration" is
+  NOT reliably expressible in GritQL when a type has more than one member — this is why
+  `require-memo-primitives.grit` doesn't attempt to resolve a bare reference to a local
+  declaration at all (see the package section above); it only handles structural
+  array/tuple/mapped/generic-reference checks, which don't need this kind of resolution.
 - Config `plugins` paths resolve relative to the config file's own directory — a temp config
   written into a nested `test/fixtures/` dir with a `../foo.grit` reference fails with `Cannot
 read file`; the config must sit next to the `.grit` files.
