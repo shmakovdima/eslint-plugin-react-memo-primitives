@@ -340,3 +340,42 @@ tsRuleTester.run("require-memo-primitives (typed, TS type-kind sweep)", rule, {
     },
   ],
 });
+
+tsRuleTester.run("require-memo-primitives (PropsWithChildren)", rule, {
+  valid: [
+    // Regression: `children` from PropsWithChildren<T> is ReactNode, never primitive, so this
+    // must NOT be flagged as needing memo even though `title` alone would qualify.
+    `
+    const MyComponent = ({ title, children }: PropsWithChildren<{ title: string }>) => {
+      return <div>{title}{children}</div>;
+    };
+    `,
+    // Qualified `React.PropsWithChildren<T>` form.
+    `
+    const MyComponent = ({ title, children }: React.PropsWithChildren<{ title: string }>) => {
+      return <div>{title}{children}</div>;
+    };
+    `,
+  ],
+  invalid: [
+    // T's members alone are all-primitive even when `children` isn't destructured — still
+    // requires memo (children not being used doesn't change the component's own prop shape).
+    {
+      code: `
+      const MyComponent = ({ title }: PropsWithChildren<{ title: string }>) => {
+        return <div>{title}</div>;
+      };
+      `,
+      errors: [{ messageId: "missingMemo" }],
+    },
+    // Companion: memo-wrapped with `children` destructured must be actively flagged.
+    {
+      code: `
+      const MyComponent = memo(({ title, children }: PropsWithChildren<{ title: string }>) => {
+        return <div>{title}{children}</div>;
+      });
+      `,
+      errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
+    },
+  ],
+});

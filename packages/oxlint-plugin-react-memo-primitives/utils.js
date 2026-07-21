@@ -213,6 +213,53 @@ function resolveLocalTypeMembers(programNode, typeName) {
   return resolved?.kind === "object" ? resolved.members : null;
 }
 
+// A synthetic type node representing "definitely not primitive" for props that don't come from
+// a real TSPropertySignature (currently just the implicit `children: ReactNode` injected by
+// `PropsWithChildren<T>` — see resolvePropsWithChildrenMembers below). Neither
+// PRIMITIVE_TS_TYPE_KINDS nor NON_PRIMITIVE_TS_TYPE_KINDS contains this fake `type`, so
+// isPrimitiveTsType correctly falls through to its final `return false` — same result as if
+// `children` had a real TSTypeReference to ReactNode, without needing to fabricate one.
+const NON_PRIMITIVE_SENTINEL = Object.freeze({
+  type: "__NonPrimitiveSentinel",
+});
+
+// `React.PropsWithChildren<T>` / `PropsWithChildren<T>` (React's own generic helper type,
+// `type PropsWithChildren<P> = P & { children?: ReactNode }`) is common enough in real prop
+// types that it's handled specially: unlike an arbitrary unresolvable generic reference (no
+// known shape at all), this one has a well-known shape — take T's members (if T is an inline
+// object literal) and add a synthetic non-primitive `children` member, since ReactNode is never
+// primitive. Returns null if the reference isn't PropsWithChildren, or its single type argument
+// isn't an inline object literal.
+function resolvePropsWithChildrenMembers(annotation) {
+  if (
+    annotation.type !== "TSTypeReference" ||
+    annotation.typeArguments?.params?.length !== 1
+  ) {
+    return null;
+  }
+  const { typeName } = annotation;
+  const name =
+    typeName.type === "Identifier"
+      ? typeName.name
+      : typeName.type === "TSQualifiedName" &&
+          typeName.right.type === "Identifier"
+        ? typeName.right.name
+        : null;
+  if (name !== "PropsWithChildren") return null;
+
+  const typeArg = annotation.typeArguments.params[0];
+  if (typeArg.type !== "TSTypeLiteral") return null;
+
+  return [
+    ...typeArg.members,
+    {
+      type: "TSPropertySignature",
+      key: { type: "Identifier", name: "children" },
+      typeAnnotation: { typeAnnotation: NON_PRIMITIVE_SENTINEL },
+    },
+  ];
+}
+
 // Extracts the TS type annotation node for a function's single object-pattern parameter,
 // resolving a named type reference (`({ a }: Props) => ...`) to its local declaration's members
 // when possible. Returns null when there's no annotation at all, or the annotation references a
@@ -225,6 +272,9 @@ function getObjectPatternMemberTypes(objectPattern, programNode) {
   if (annotation.type === "TSTypeLiteral") {
     return annotation.members;
   }
+
+  const propsWithChildrenMembers = resolvePropsWithChildrenMembers(annotation);
+  if (propsWithChildrenMembers) return propsWithChildrenMembers;
 
   if (
     annotation.type === "TSTypeReference" &&

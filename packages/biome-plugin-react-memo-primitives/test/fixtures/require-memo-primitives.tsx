@@ -184,3 +184,35 @@ type PairProps = { pair: [string, number] };
 const PairLabel = ({ pair }: PairProps) => {
   return <div>{pair[0]}</div>;
 };
+
+// expect-ok: regression — children from PropsWithChildren<T> is ReactNode, never primitive
+const WithChildren = ({
+  title,
+  children,
+}: PropsWithChildren<{ title: string }>) => {
+  return (
+    <div>
+      {title}
+      {children}
+    </div>
+  );
+};
+
+// expect-error: wrapped in memo but children (from PropsWithChildren) is non-primitive
+const WithChildrenMemoized = memo(
+  ({ title, children }: PropsWithChildren<{ title: string }>) => {
+    return (
+      <div>
+        {title}
+        {children}
+      </div>
+    );
+  },
+);
+
+// expect-error: PropsWithChildren's T members alone are all-primitive when children isn't destructured
+const WithChildrenUnused = ({
+  title,
+}: PropsWithChildren<{ title: string }>) => {
+  return <div>{title}</div>;
+};

@@ -154,3 +154,23 @@ const _DefaultValueLabel = ({ title, count = 0 }: _DefaultValueProps) => {
     </div>
   );
 };
+
+// expect-ok: regression — children from PropsWithChildren<T> is ReactNode, never primitive
+const _WithChildren = ({
+  title,
+  children,
+}: PropsWithChildren<{ title: string }>) => {
+  return (
+    <div>
+      {title}
+      {children}
+    </div>
+  );
+};
+
+// expect-error: PropsWithChildren's T members alone are all-primitive when children isn't destructured
+const _WithChildrenUnused = ({
+  title,
+}: PropsWithChildren<{ title: string }>) => {
+  return <div>{title}</div>;
+};
