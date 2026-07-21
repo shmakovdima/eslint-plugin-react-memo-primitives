@@ -24,10 +24,13 @@ module.exports = {
     messages: {
       missingMemo:
         "Component with primitive props should be wrapped in React.memo",
+      unnecessaryMemoNonPrimitive:
+        "Component with a non-primitive prop (object, function, ref, or other unresolvable type) should not be wrapped in React.memo — memo only pays off when every prop is primitive, since a non-primitive prop can still change identity on every render",
     },
   },
   create(context) {
     let reactImports;
+    let programNode;
 
     function check(node) {
       const match = getFunctionAndDeclarator(node, reactImports);
@@ -39,12 +42,18 @@ module.exports = {
       const objectPattern = getObjectPatternParam(fn);
       if (!objectPattern || objectPattern.properties.length === 0) return;
 
-      if (!hasOnlyPrimitiveProps(objectPattern)) return;
+      const wrapped = isWrappedInMemo(declarator, reactImports);
+      const allPrimitive = hasOnlyPrimitiveProps(objectPattern, programNode);
 
-      if (!isWrappedInMemo(declarator, reactImports)) {
+      if (allPrimitive && !wrapped) {
         context.report({
           node: getReportNode(fn, declarator),
           messageId: "missingMemo",
+        });
+      } else if (!allPrimitive && wrapped) {
+        context.report({
+          node: getReportNode(fn, declarator),
+          messageId: "unnecessaryMemoNonPrimitive",
         });
       }
     }
@@ -52,6 +61,7 @@ module.exports = {
     return {
       Program(node) {
         reactImports = getReactImportBindings(node);
+        programNode = node;
       },
       ArrowFunctionExpression: check,
       FunctionExpression: check,

@@ -38,6 +38,10 @@ const CASES = [
     plugin: "require-memo-primitives.grit",
     fixture: "require-memo-primitives-real-import.tsx",
   },
+  {
+    plugin: "require-memo-displayname.grit",
+    fixture: "require-memo-displayname.tsx",
+  },
 ];
 
 function expectedErrorLines(fixturePath) {

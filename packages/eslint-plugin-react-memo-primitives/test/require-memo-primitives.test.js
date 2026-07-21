@@ -1,10 +1,20 @@
 "use strict";
 
 const { RuleTester } = require("eslint");
+const tsParser = require("@typescript-eslint/parser");
 const rule = require("../lib/rules/require-memo-primitives");
 
 const ruleTester = new RuleTester({
   languageOptions: {
+    ecmaVersion: 2020,
+    sourceType: "module",
+    parserOptions: { ecmaFeatures: { jsx: true } },
+  },
+});
+
+const tsRuleTester = new RuleTester({
+  languageOptions: {
+    parser: tsParser,
     ecmaVersion: 2020,
     sourceType: "module",
     parserOptions: { ecmaFeatures: { jsx: true } },
@@ -54,6 +64,159 @@ ruleTester.run("require-memo-primitives", rule, {
     {
       code: 'import * as React from "some-other-lib";\nconst MyComponent = React.memo(({ title }) => { return <h1>{title}</h1>; });',
       errors: [{ messageId: "missingMemo" }],
+    },
+  ],
+});
+
+ruleTester.run(
+  "require-memo-primitives (untyped, non-primitive + memo)",
+  rule,
+  {
+    valid: [
+      // Non-primitive-looking name (`Config`) with no memo — out of scope for this rule either way
+      // (it's not flagged as missing memo, and it's not wrapped in memo either).
+      "const MyComponent = ({ Config }) => { return <h1>{Config.title}</h1>; };",
+    ],
+    invalid: [
+      // Untyped code has no way to prove a prop is non-primitive by name alone, but a destructured
+      // rest element is unambiguous: it always captures a subset of the props object, never a
+      // primitive.
+      {
+        code: "const MyComponent = memo(({ title, ...rest }) => { return <h1>{title}</h1>; });",
+        errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
+      },
+    ],
+  },
+);
+
+tsRuleTester.run("require-memo-primitives (typed)", rule, {
+  valid: [
+    // Regression (reported false positive): emailInputRef is a MutableRefObject, register is
+    // a UseFormRegisterReturn, and handleAcceptClick is a function — none of those are
+    // primitives, so this component must NOT be flagged as needing memo even though most of
+    // its other props (strings/booleans) look primitive.
+    `
+    type ReferralHeroInputProps = {
+      code: string | undefined;
+      emailInputRef: MutableRefObject<HTMLInputElement | null>;
+      handleAcceptClick: () => void;
+      isCustomCode: boolean;
+      isEmailSubmitting: boolean;
+      isEmailValid: boolean;
+      locale: LocaleType;
+      referralCodeFromCookie: string | undefined;
+      register: UseFormRegisterReturn<"email">;
+      routerCode: string | undefined;
+    };
+
+    export const ReferralHeroInput = ({
+      code,
+      emailInputRef,
+      handleAcceptClick,
+      isCustomCode,
+      isEmailSubmitting,
+      isEmailValid,
+      locale,
+      referralCodeFromCookie,
+      register,
+      routerCode,
+    }: ReferralHeroInputProps) => {
+      return <input ref={emailInputRef} onClick={handleAcceptClick}>{code}</input>;
+    };
+    `,
+    // Simplified variant of the above, kept for a minimal repro.
+    `
+    type Props = {
+      code: string | undefined;
+      emailInputRef: MutableRefObject<HTMLInputElement | null>;
+      handleAcceptClick: () => void;
+    };
+    const ReferralHeroInput = ({ code, emailInputRef, handleAcceptClick }: Props) => {
+      return <input ref={emailInputRef} onClick={handleAcceptClick}>{code}</input>;
+    };
+    `,
+    // Inline object type literal with a function member — same as above, no local alias.
+    `
+    const MyComponent = ({ title, onClick }: { title: string; onClick: () => void }) => {
+      return <h1 onClick={onClick}>{title}</h1>;
+    };
+    `,
+    // Nested object-shaped member.
+    `
+    type Props = { title: string; config: { theme: string } };
+    const MyComponent = ({ title, config }: Props) => {
+      return <h1>{title}-{config.theme}</h1>;
+    };
+    `,
+  ],
+  invalid: [
+    // All-primitive props via a local type alias, including a union with undefined.
+    {
+      code: `
+      type Props = { title: string; age: number | undefined };
+      const MyComponent = ({ title, age }: Props) => { return <h1>{title}-{age}</h1>; };
+      `,
+      errors: [{ messageId: "missingMemo" }],
+    },
+    // All-primitive props via inline object type literal.
+    {
+      code: `
+      const MyComponent = ({ title, isActive }: { title: string; isActive: boolean }) => {
+        return <h1>{title}-{isActive}</h1>;
+      };
+      `,
+      errors: [{ messageId: "missingMemo" }],
+    },
+    // Interface form.
+    {
+      code: `
+      interface Props { title: string; }
+      const MyComponent = ({ title }: Props) => { return <h1>{title}</h1>; };
+      `,
+      errors: [{ messageId: "missingMemo" }],
+    },
+    // Regression companion: the exact ReferralHeroInput shape, but wrapped in memo — since
+    // emailInputRef/handleAcceptClick/register aren't primitives, memo should be actively flagged
+    // as unnecessary here, not just "not required."
+    {
+      code: `
+      type ReferralHeroInputProps = {
+        code: string | undefined;
+        emailInputRef: MutableRefObject<HTMLInputElement | null>;
+        handleAcceptClick: () => void;
+        isCustomCode: boolean;
+        register: UseFormRegisterReturn<"email">;
+      };
+      const ReferralHeroInput = memo(({
+        code,
+        emailInputRef,
+        handleAcceptClick,
+        isCustomCode,
+        register,
+      }: ReferralHeroInputProps) => {
+        return <input ref={emailInputRef} onClick={handleAcceptClick}>{code}</input>;
+      });
+      `,
+      errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
+    },
+    // Nested object-shaped member, wrapped in memo.
+    {
+      code: `
+      type Props = { title: string; config: { theme: string } };
+      const MyComponent = React.memo(({ title, config }: Props) => {
+        return <h1>{title}-{config.theme}</h1>;
+      });
+      `,
+      errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
+    },
+    // Inline object type literal with a function member, wrapped in memo.
+    {
+      code: `
+      const MyComponent = memo(({ title, onClick }: { title: string; onClick: () => void }) => {
+        return <h1 onClick={onClick}>{title}</h1>;
+      });
+      `,
+      errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
     },
   ],
 });

@@ -35,6 +35,10 @@ const CASES = [
     rule: "require-memo-primitives",
     fixture: "require-memo-primitives-real-import.tsx",
   },
+  {
+    rule: "require-memo-displayname",
+    fixture: "require-memo-displayname.tsx",
+  },
 ];
 
 function expectedErrorLines(fixturePath) {

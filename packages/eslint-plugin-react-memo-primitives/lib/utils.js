@@ -70,11 +70,13 @@ function looksLikeMemoCallExpression(node) {
 }
 
 /**
- * Heuristic: a destructured prop counts as "primitive" if it's a plain identifier binding
- * that starts with a lowercase letter and isn't literally named `props`. This is a naming
- * heuristic, not a type check — ESLint's AST alone can't tell a primitive from an object.
+ * Fallback heuristic used only when no TS type annotation is available (plain JS/JSX files,
+ * or a destructure with no parameter type): a destructured prop counts as "primitive" if it's
+ * a plain identifier binding that starts with a lowercase letter and isn't literally named
+ * `props`. This cannot see real types, so it's wrong for e.g. `{ onClick }` (a function) —
+ * it exists only to preserve pre-1.2.0 behavior for untyped code.
  */
-function hasOnlyPrimitiveProps(objectPattern) {
+function hasOnlyPrimitiveNames(objectPattern) {
   return objectPattern.properties.every((prop) => {
     if (prop.type === "RestElement") return false;
     return (
@@ -83,6 +85,137 @@ function hasOnlyPrimitiveProps(objectPattern) {
       prop.value.name[0] === prop.value.name[0].toLowerCase() &&
       prop.value.name !== "props"
     );
+  });
+}
+
+/**
+ * TS type-node kinds that are always primitive regardless of contents.
+ */
+const PRIMITIVE_TS_TYPE_KINDS = new Set([
+  "TSStringKeyword",
+  "TSNumberKeyword",
+  "TSBooleanKeyword",
+  "TSBigIntKeyword",
+  "TSNullKeyword",
+  "TSUndefinedKeyword",
+  "TSVoidKeyword",
+  "TSLiteralType",
+  "TSTemplateLiteralType",
+]);
+
+/**
+ * Recursively classifies a TS type node as primitive-or-not. Unions (`string | undefined`) are
+ * primitive only if every member is. Named type references (`LocaleType`, `MutableRefObject<T>`)
+ * can't be resolved to their definition from a single file's AST without a full type checker, so
+ * they're conservatively treated as non-primitive — this only matters for local type aliases that
+ * themselves resolve to a primitive, which is rare for prop types and safe to require memo for.
+ */
+function isPrimitiveTsType(typeNode) {
+  if (!typeNode) return false;
+  if (PRIMITIVE_TS_TYPE_KINDS.has(typeNode.type)) return true;
+  if (typeNode.type === "TSParenthesizedType") {
+    return isPrimitiveTsType(typeNode.typeAnnotation);
+  }
+  if (
+    typeNode.type === "TSUnionType" ||
+    typeNode.type === "TSIntersectionType"
+  ) {
+    return typeNode.types.every(isPrimitiveTsType);
+  }
+  return false;
+}
+
+/**
+ * Finds a top-level `interface Foo { ... }` or `type Foo = { ... }` declaration by name in the
+ * Program body, returning its member list (TSPropertySignature[]) or null if not found / not an
+ * object-shaped type (e.g. `type Foo = string` or a type imported from elsewhere).
+ */
+function resolveLocalTypeMembers(programNode, typeName) {
+  for (const statement of programNode.body) {
+    if (
+      statement.type === "TSInterfaceDeclaration" &&
+      statement.id.name === typeName
+    ) {
+      return statement.body.body;
+    }
+    if (
+      statement.type === "TSTypeAliasDeclaration" &&
+      statement.id.name === typeName &&
+      statement.typeAnnotation.type === "TSTypeLiteral"
+    ) {
+      return statement.typeAnnotation.members;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extracts the TS type annotation node for a function's single object-pattern parameter,
+ * resolving a named type reference (`({ a }: Props) => ...`) to its local declaration's
+ * members when possible. Returns null when there's no annotation at all, or the annotation
+ * references a type this function can't resolve from the current file (imported type, generic,
+ * non-object type) — callers treat null as "no type info available."
+ */
+function getObjectPatternMemberTypes(objectPattern, programNode) {
+  const annotation = objectPattern.typeAnnotation?.typeAnnotation;
+  if (!annotation) return null;
+
+  if (annotation.type === "TSTypeLiteral") {
+    return annotation.members;
+  }
+
+  if (
+    annotation.type === "TSTypeReference" &&
+    annotation.typeName.type === "Identifier" &&
+    programNode
+  ) {
+    return resolveLocalTypeMembers(programNode, annotation.typeName.name);
+  }
+
+  return null;
+}
+
+/**
+ * A destructured prop counts as "primitive" if its declared TS type is a primitive (string,
+ * number, boolean, bigint, null, undefined, void, literal types, or unions/intersections of
+ * those only). When TS type info can't be determined for a property (no parameter type
+ * annotation, unresolvable type reference, computed/rest member), falls back to the pre-1.2.0
+ * naming heuristic for that property so plain-JS/JSX usage keeps working unchanged.
+ */
+function hasOnlyPrimitiveProps(objectPattern, programNode) {
+  const memberTypes = getObjectPatternMemberTypes(objectPattern, programNode);
+  if (!memberTypes) return hasOnlyPrimitiveNames(objectPattern);
+
+  const typesByName = new Map();
+  for (const member of memberTypes) {
+    if (
+      member.type === "TSPropertySignature" &&
+      member.key.type === "Identifier"
+    ) {
+      typesByName.set(member.key.name, member.typeAnnotation?.typeAnnotation);
+    }
+  }
+
+  return objectPattern.properties.every((prop) => {
+    if (prop.type === "RestElement") return false;
+    if (
+      prop.type !== "Property" ||
+      prop.value.type !== "Identifier" ||
+      prop.key.type !== "Identifier"
+    ) {
+      return false;
+    }
+
+    const declaredType = typesByName.get(prop.key.name);
+    if (declaredType === undefined) {
+      // No matching member found in the resolved type (e.g. index signature, computed key) —
+      // fall back to the naming heuristic for just this property.
+      return (
+        prop.value.name[0] === prop.value.name[0].toLowerCase() &&
+        prop.value.name !== "props"
+      );
+    }
+    return isPrimitiveTsType(declaredType);
   });
 }
 
@@ -172,6 +305,32 @@ function getReportNode(fn, declarator) {
   return declarator || fn;
 }
 
+/**
+ * Scans a Program's top-level statements for a `$name.displayName = ...` assignment
+ * (`ExpressionStatement` wrapping an `AssignmentExpression` whose left side is a
+ * `MemberExpression` `componentName.displayName`). Only a direct top-level statement is
+ * recognized — an assignment nested inside another function/block isn't found, matching how
+ * `displayName` is conventionally set immediately after a component's declaration.
+ */
+function hasDisplayNameAssignment(programNode, componentName) {
+  return programNode.body.some((statement) => {
+    if (statement.type !== "ExpressionStatement") return false;
+    const expr = statement.expression;
+    if (expr.type !== "AssignmentExpression" || expr.operator !== "=") {
+      return false;
+    }
+    const { left } = expr;
+    return (
+      left.type === "MemberExpression" &&
+      !left.computed &&
+      left.object.type === "Identifier" &&
+      left.object.name === componentName &&
+      left.property.type === "Identifier" &&
+      left.property.name === "displayName"
+    );
+  });
+}
+
 module.exports = {
   returnsJsx,
   getFunctionAndDeclarator,
@@ -181,4 +340,5 @@ module.exports = {
   isWrappedInMemo,
   getObjectPatternParam,
   getReportNode,
+  hasDisplayNameAssignment,
 };

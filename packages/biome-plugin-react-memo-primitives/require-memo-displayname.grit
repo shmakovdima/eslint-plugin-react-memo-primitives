@@ -1,0 +1,64 @@
+language js(jsx)
+
+// Flags `const Foo = memo(() => <jsx/>)` / `const Foo = React.memo(() => <jsx/>)` when the file
+// has no `Foo.displayName = ...` assignment for that component's name.
+//
+// Every memo/React.memo x arrow/function-expression combination is spelled out as its own
+// top-level alternative (rather than a single pattern with an inner `or`) for the same reason as
+// no-unnecessary-memo.grit: GritQL's `contains` doesn't reliably compile with a nested `or` of
+// multiple conditions in this Biome version (see README limitations).
+//
+// `$name.displayName = $dn` reuses `$name` (bound by the outer pattern) as a join key against
+// the whole file (`$program`) — this only matches a *direct* top-level assignment statement, not
+// one nested inside another function/block, mirroring the ESLint/oxlint versions'
+// hasDisplayNameAssignment().
+//
+// The shadowed-import guards mirror no-unnecessary-memo.grit: a same-named `memo`/`React`
+// imported from somewhere other than `'react'` isn't real memoization, so displayName isn't
+// required for it (this rule only fires on genuine memoization). `$program` is Biome's implicit
+// metavariable bound to the file root.
+
+or {
+  `const $name = memo(($props) => $body)` as $component where {
+    $body <: contains JsxTagExpression(),
+    not $program <: contains `import { memo } from $source` where { $source <: not `'react'` },
+    not $program <: contains `$name.displayName = $dn`,
+    register_diagnostic(
+      span = $name,
+      message = "Component wrapped in React.memo should have a displayName assigned",
+      severity = "error"
+    )
+  },
+  `const $name = React.memo(($props) => $body)` as $component where {
+    $body <: contains JsxTagExpression(),
+    not $program <: contains `import React from $source` where { $source <: not `'react'` },
+    not $program <: contains `import * as React from $source` where { $source <: not `'react'` },
+    not $program <: contains `$name.displayName = $dn`,
+    register_diagnostic(
+      span = $name,
+      message = "Component wrapped in React.memo should have a displayName assigned",
+      severity = "error"
+    )
+  },
+  `const $name = memo(function ($props) { $body }) ` as $component where {
+    $body <: contains JsxTagExpression(),
+    not $program <: contains `import { memo } from $source` where { $source <: not `'react'` },
+    not $program <: contains `$name.displayName = $dn`,
+    register_diagnostic(
+      span = $name,
+      message = "Component wrapped in React.memo should have a displayName assigned",
+      severity = "error"
+    )
+  },
+  `const $name = React.memo(function ($props) { $body }) ` as $component where {
+    $body <: contains JsxTagExpression(),
+    not $program <: contains `import React from $source` where { $source <: not `'react'` },
+    not $program <: contains `import * as React from $source` where { $source <: not `'react'` },
+    not $program <: contains `$name.displayName = $dn`,
+    register_diagnostic(
+      span = $name,
+      message = "Component wrapped in React.memo should have a displayName assigned",
+      severity = "error"
+    )
+  }
+}

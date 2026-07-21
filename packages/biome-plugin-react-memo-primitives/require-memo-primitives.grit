@@ -1,47 +1,259 @@
 language js(jsx)
 
-// Flags `const Foo = (props) => <jsx/>` (or a function-expression / function-declaration
-// equivalent) when `props` is destructured into an object pattern and the component isn't
-// wrapped in `memo(...)` / `React.memo(...)`.
+// Two things are flagged here, in one top-level `or` (each branch does its own
+// register_diagnostic — GritQL requires exactly one top-level pattern per file, so both
+// directions of this rule have to live in the same `or` rather than as separate patterns):
 //
-// Heuristic, not a type check: GritQL has no access to TypeScript types, so "primitive" is
-// approximated as "the parameter is a destructured object pattern (JsObjectBindingPattern)".
-// Unlike the ESLint/oxlint versions, this doesn't inspect individual property names or exclude
-// nested object/array sub-patterns (e.g. `{ user: { name } }`) — GritQL's node-kind matching
-// couldn't express that exclusion reliably as of Biome 2.5.4 (see README limitations). A
-// destructured prop that is itself an object/array will still be treated as primitive here.
+//   1. `const Foo = (props) => <jsx/>` (or a function-expression / function-declaration
+//      equivalent) with an all-primitive-props destructure, NOT wrapped in `memo(...)` /
+//      `React.memo(...)` — "missing memo".
+//   2. The same component shapes, WRAPPED in `memo(...)` / `React.memo(...)`, where the props are
+//      NOT all-primitive — "unnecessary/harmful memo", since a non-primitive prop can still change
+//      identity every render regardless of memoization.
 //
-// Most alternatives below require the function to be the *direct* declarator init (or a bare
+// "Primitive" is determined two ways, since GritQL has no full type checker:
+//   - If the parameter has a TS type annotation (inline object type literal, or a reference to a
+//     local `type`/`interface` declaration resolved by name via $typename), each member's own
+//     type is inspected: it's non-primitive if it contains a TsObjectType (nested object shape),
+//     TsFunctionType, or TsReferenceType (an unresolvable named type, e.g. `MutableRefObject<T>`
+//     or `UseFormRegisterReturn<...>`) anywhere in it. This is deliberately conservative — a type
+//     alias that itself resolves to a primitive would be misclassified, but that's rare for prop
+//     types. `TsObjectType()`/`TsFunctionType()`/`TsReferenceType()` are only checked via a
+//     `` `: $member` `` sub-pattern (never directly against the type body itself) because
+//     `$typebody <: not contains TsObjectType()` is always false when `$typebody` IS a
+//     TsObjectType — a documented self-containment trap (see README limitations).
+//   - If there's no type annotation at all (plain JS/JSX), rule 1 falls back to the pre-1.2.0
+//     heuristic: any destructured object pattern counts as primitive-props, no per-property
+//     inspection at all (see README limitations re: nested object/array sub-patterns like
+//     `{ user: { name } }` being coarsely treated as primitive in this untyped fallback path
+//     only). Rule 2 has no untyped fallback: with no type info at all, GritQL can't prove a prop
+//     is non-primitive, so an untyped memo-wrapped component is never flagged by rule 2 — that
+//     silence is a known gap, not a claim the props are actually primitive.
+//
+// Rule 1's alternatives below require the function to be the *direct* declarator init (or a bare
 // declaration) — a genuine `memo(...)`/`React.memo(...)`-wrapped function has a different outer
 // shape (the CallExpression sits between the declarator and the function) and so never matches
 // these patterns to begin with. That's what makes "not wrapped in memo" implicit for those
 // alternatives, instead of an explicit `not contains` check on the component.
 //
-// The last two alternatives cover the shadowed-import case: `const Foo = memo(($props) => ...)`
-// *looks* memo-wrapped, but if `memo`/`React` in this file is provably imported from somewhere
-// other than `'react'`, it isn't real memoization — the same case the ESLint/oxlint versions
-// handle via getFunctionAndDeclarator's looksLikeMemoCallExpression fallback. $program is
-// Biome's implicit metavariable bound to the file root.
+// Rule 1's last two alternatives (and rule 2's shadowed-import alternatives) cover the
+// shadowed-import case: `const Foo = memo(($props) => ...)` *looks* memo-wrapped, but if
+// `memo`/`React` in this file is provably imported from somewhere other than `'react'`, it isn't
+// real memoization — the same case the ESLint/oxlint versions handle via
+// getFunctionAndDeclarator's looksLikeMemoCallExpression fallback. $program is Biome's implicit
+// metavariable bound to the file root.
 
 or {
-  `const $name = ($props) => $body` as $component,
-  `const $name = function ($props) { $body }` as $component,
-  `function $name($props) { $body }` as $component,
+  // Rule 1: missing memo.
+  `const $name = ($props) => $body` as $component where {
+    $props <: contains JsObjectBindingPattern(),
+    $body <: contains JsxTagExpression(),
+    or {
+      $props <: contains `: $typename` where {
+        $program <: contains `type $typename = $typebody`,
+        not $typebody <: contains `: $badmember1` where {
+          $badmember1 <: contains TsObjectType()
+        },
+        not $typebody <: contains `: $badmember2` where {
+          $badmember2 <: contains TsFunctionType()
+        },
+        not $typebody <: contains `: $badmember3` where {
+          $badmember3 <: contains TsReferenceType()
+        }
+      },
+      $props <: contains TsObjectType() as $inlinetype where {
+        not $inlinetype <: contains `: $badmember4` where {
+          $badmember4 <: contains TsObjectType()
+        },
+        not $inlinetype <: contains `: $badmember5` where {
+          $badmember5 <: contains TsFunctionType()
+        },
+        not $inlinetype <: contains `: $badmember6` where {
+          $badmember6 <: contains TsReferenceType()
+        }
+      },
+      not $props <: contains `: $anytype`
+    },
+    register_diagnostic(
+      span = $name,
+      message = "Component with primitive props should be wrapped in React.memo",
+      severity = "error"
+    )
+  },
+  `const $name = function ($props) { $body }` as $component where {
+    $props <: contains JsObjectBindingPattern(),
+    $body <: contains JsxTagExpression(),
+    or {
+      $props <: contains `: $typename` where {
+        $program <: contains `type $typename = $typebody`,
+        not $typebody <: contains `: $badmember1` where {
+          $badmember1 <: contains TsObjectType()
+        },
+        not $typebody <: contains `: $badmember2` where {
+          $badmember2 <: contains TsFunctionType()
+        },
+        not $typebody <: contains `: $badmember3` where {
+          $badmember3 <: contains TsReferenceType()
+        }
+      },
+      $props <: contains TsObjectType() as $inlinetype where {
+        not $inlinetype <: contains `: $badmember4` where {
+          $badmember4 <: contains TsObjectType()
+        },
+        not $inlinetype <: contains `: $badmember5` where {
+          $badmember5 <: contains TsFunctionType()
+        },
+        not $inlinetype <: contains `: $badmember6` where {
+          $badmember6 <: contains TsReferenceType()
+        }
+      },
+      not $props <: contains `: $anytype`
+    },
+    register_diagnostic(
+      span = $name,
+      message = "Component with primitive props should be wrapped in React.memo",
+      severity = "error"
+    )
+  },
+  `function $name($props) { $body }` as $component where {
+    $props <: contains JsObjectBindingPattern(),
+    $body <: contains JsxTagExpression(),
+    or {
+      $props <: contains `: $typename` where {
+        $program <: contains `type $typename = $typebody`,
+        not $typebody <: contains `: $badmember1` where {
+          $badmember1 <: contains TsObjectType()
+        },
+        not $typebody <: contains `: $badmember2` where {
+          $badmember2 <: contains TsFunctionType()
+        },
+        not $typebody <: contains `: $badmember3` where {
+          $badmember3 <: contains TsReferenceType()
+        }
+      },
+      $props <: contains TsObjectType() as $inlinetype where {
+        not $inlinetype <: contains `: $badmember4` where {
+          $badmember4 <: contains TsObjectType()
+        },
+        not $inlinetype <: contains `: $badmember5` where {
+          $badmember5 <: contains TsFunctionType()
+        },
+        not $inlinetype <: contains `: $badmember6` where {
+          $badmember6 <: contains TsReferenceType()
+        }
+      },
+      not $props <: contains `: $anytype`
+    },
+    register_diagnostic(
+      span = $name,
+      message = "Component with primitive props should be wrapped in React.memo",
+      severity = "error"
+    )
+  },
   `const $name = memo(($props) => $body)` as $component where {
-    $program <: contains `import { memo } from $source` where { $source <: not `'react'` }
+    $program <: contains `import { memo } from $source` where { $source <: not `'react'` },
+    $props <: contains JsObjectBindingPattern(),
+    $body <: contains JsxTagExpression(),
+    register_diagnostic(
+      span = $name,
+      message = "Component with primitive props should be wrapped in React.memo",
+      severity = "error"
+    )
   },
   `const $name = React.memo(($props) => $body)` as $component where {
-    $program <: contains `import React from $source` where { $source <: not `'react'` }
+    $program <: contains `import React from $source` where { $source <: not `'react'` },
+    $props <: contains JsObjectBindingPattern(),
+    $body <: contains JsxTagExpression(),
+    register_diagnostic(
+      span = $name,
+      message = "Component with primitive props should be wrapped in React.memo",
+      severity = "error"
+    )
   },
   `const $name = React.memo(($props) => $body)` as $component where {
-    $program <: contains `import * as React from $source` where { $source <: not `'react'` }
+    $program <: contains `import * as React from $source` where { $source <: not `'react'` },
+    $props <: contains JsObjectBindingPattern(),
+    $body <: contains JsxTagExpression(),
+    register_diagnostic(
+      span = $name,
+      message = "Component with primitive props should be wrapped in React.memo",
+      severity = "error"
+    )
+  },
+  // Rule 2: memo wrapping a component with a non-primitive prop — actively disallowed. Only
+  // fires when there's a type annotation to prove non-primitivity (see file comment); genuinely
+  // memo-wrapped (not shadowed) `memo`/`React.memo` only.
+  `const $name = memo(($props) => $body)` as $component where {
+    not $program <: contains `import { memo } from $source` where { $source <: not `'react'` },
+    $body <: contains JsxTagExpression(),
+    or {
+      $props <: contains `: $typename` where {
+        $program <: contains `type $typename = $typebody`,
+        or {
+          $typebody <: contains `: $badmember7` where { $badmember7 <: contains TsObjectType() },
+          $typebody <: contains `: $badmember8` where {
+            $badmember8 <: contains TsFunctionType()
+          },
+          $typebody <: contains `: $badmember9` where {
+            $badmember9 <: contains TsReferenceType()
+          }
+        }
+      },
+      $props <: contains TsObjectType() as $inlinetype2 where {
+        or {
+          $inlinetype2 <: contains `: $badmember10` where {
+            $badmember10 <: contains TsObjectType()
+          },
+          $inlinetype2 <: contains `: $badmember11` where {
+            $badmember11 <: contains TsFunctionType()
+          },
+          $inlinetype2 <: contains `: $badmember12` where {
+            $badmember12 <: contains TsReferenceType()
+          }
+        }
+      }
+    },
+    register_diagnostic(
+      span = $name,
+      message = "Component with a non-primitive prop (object, function, ref, or other unresolvable type) should not be wrapped in React.memo",
+      severity = "error"
+    )
+  },
+  `const $name = React.memo(($props) => $body)` as $component where {
+    not $program <: contains `import React from $source` where { $source <: not `'react'` },
+    not $program <: contains `import * as React from $source` where { $source <: not `'react'` },
+    $body <: contains JsxTagExpression(),
+    or {
+      $props <: contains `: $typename` where {
+        $program <: contains `type $typename = $typebody`,
+        or {
+          $typebody <: contains `: $badmember7` where { $badmember7 <: contains TsObjectType() },
+          $typebody <: contains `: $badmember8` where {
+            $badmember8 <: contains TsFunctionType()
+          },
+          $typebody <: contains `: $badmember9` where {
+            $badmember9 <: contains TsReferenceType()
+          }
+        }
+      },
+      $props <: contains TsObjectType() as $inlinetype2 where {
+        or {
+          $inlinetype2 <: contains `: $badmember10` where {
+            $badmember10 <: contains TsObjectType()
+          },
+          $inlinetype2 <: contains `: $badmember11` where {
+            $badmember11 <: contains TsFunctionType()
+          },
+          $inlinetype2 <: contains `: $badmember12` where {
+            $badmember12 <: contains TsReferenceType()
+          }
+        }
+      }
+    },
+    register_diagnostic(
+      span = $name,
+      message = "Component with a non-primitive prop (object, function, ref, or other unresolvable type) should not be wrapped in React.memo",
+      severity = "error"
+    )
   }
-} where {
-  $props <: contains JsObjectBindingPattern(),
-  $body <: contains JsxTagExpression(),
-  register_diagnostic(
-    span = $name,
-    message = "Component with primitive props should be wrapped in React.memo",
-    severity = "error"
-  )
 }

@@ -7,6 +7,7 @@ const {
   isWrappedInMemo,
   getObjectPatternParam,
   getReportNode,
+  hasDisplayNameAssignment,
 } = require("./utils");
 
 const requireMemoPrimitives = defineRule({
@@ -19,6 +20,7 @@ const requireMemoPrimitives = defineRule({
   },
   create(context) {
     let reactImports;
+    let programNode;
 
     function check(node) {
       const match = getFunctionAndDeclarator(node, reactImports);
@@ -30,12 +32,19 @@ const requireMemoPrimitives = defineRule({
       const objectPattern = getObjectPatternParam(fn);
       if (!objectPattern || objectPattern.properties.length === 0) return;
 
-      if (!hasOnlyPrimitiveProps(objectPattern)) return;
+      const wrapped = isWrappedInMemo(declarator, reactImports);
+      const allPrimitive = hasOnlyPrimitiveProps(objectPattern, programNode);
 
-      if (!isWrappedInMemo(declarator, reactImports)) {
+      if (allPrimitive && !wrapped) {
         context.report({
           message:
             "Component with primitive props should be wrapped in React.memo",
+          node: getReportNode(fn, declarator),
+        });
+      } else if (!allPrimitive && wrapped) {
+        context.report({
+          message:
+            "Component with a non-primitive prop (object, function, ref, or other unresolvable type) should not be wrapped in React.memo — memo only pays off when every prop is primitive, since a non-primitive prop can still change identity on every render",
           node: getReportNode(fn, declarator),
         });
       }
@@ -44,6 +53,7 @@ const requireMemoPrimitives = defineRule({
     return {
       Program(node) {
         reactImports = getReactImportBindings(node);
+        programNode = node;
       },
       ArrowFunctionExpression: check,
       FunctionExpression: check,
@@ -96,11 +106,53 @@ const noUnnecessaryMemo = defineRule({
   },
 });
 
+const requireMemoDisplayname = defineRule({
+  meta: {
+    type: "suggestion",
+    docs: {
+      description:
+        "Require a displayName assignment for components wrapped in React.memo",
+    },
+  },
+  create(context) {
+    let reactImports;
+    let programNode;
+
+    function check(node) {
+      const match = getFunctionAndDeclarator(node, reactImports);
+      if (!match) return;
+      const { fn, declarator } = match;
+
+      if (!returnsJsx(fn.body)) return;
+      if (!isWrappedInMemo(declarator, reactImports)) return;
+      if (!declarator || declarator.id.type !== "Identifier") return;
+
+      const componentName = declarator.id.name;
+      if (!hasDisplayNameAssignment(programNode, componentName)) {
+        context.report({
+          message: `Component wrapped in React.memo should have a displayName assigned (e.g. \`${componentName}.displayName = "${componentName}";\`)`,
+          node: declarator,
+        });
+      }
+    }
+
+    return {
+      Program(node) {
+        reactImports = getReactImportBindings(node);
+        programNode = node;
+      },
+      ArrowFunctionExpression: check,
+      FunctionExpression: check,
+    };
+  },
+});
+
 const plugin = definePlugin({
   meta: { name: "react-memo-primitives" },
   rules: {
     "require-memo-primitives": requireMemoPrimitives,
     "no-unnecessary-memo": noUnnecessaryMemo,
+    "require-memo-displayname": requireMemoDisplayname,
   },
 });
 

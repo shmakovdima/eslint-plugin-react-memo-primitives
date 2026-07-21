@@ -1,8 +1,8 @@
 # react-memo-primitives
 
-Lint rules that enforce `React.memo` on components with primitive props, and flag `React.memo` on
-components with no props — implemented for three linters. Pick the package that matches your
-toolchain:
+Lint rules that enforce `React.memo` on components with primitive props, flag `React.memo` on
+components with no props or with a non-primitive prop, and require a `displayName` on memoized
+components — implemented for three linters. Pick the package that matches your toolchain:
 
 | Package                                                                               | Linter                       | Config format                                  |
 | ------------------------------------------------------------------------------------- | ---------------------------- | ---------------------------------------------- |
@@ -12,13 +12,18 @@ toolchain:
 
 ## Rules
 
-Every package implements the same two rules:
+Every package implements the same three rules:
 
-- **require-memo-primitives** — a functional component that returns JSX and destructures a
-  single object parameter made up entirely of primitive-looking props (string, number, boolean,
-  etc.) must be wrapped in `memo(...)` or `React.memo(...)`.
+- **require-memo-primitives** — bidirectional: a functional component that returns JSX and
+  destructures a single object parameter of props is checked for whether **all** props are
+  primitive (string, number, boolean, bigint, null, undefined, literal types, or
+  unions/intersections of those). All-primitive and not memoized → memo is required.
+  Non-primitive (object, function, ref, or other unresolvable type) and memoized → memo is
+  flagged as unnecessary, since a non-primitive prop can still change identity every render.
 - **no-unnecessary-memo** — a component wrapped in `memo(...)` / `React.memo(...)` that takes no
   props doesn't need to be — memoizing a component with no props buys nothing.
+- **require-memo-displayname** — a component wrapped in `memo(...)` / `React.memo(...)` must have
+  a `Foo.displayName = "..."` assignment for its name.
 
 ```tsx
 // require-memo-primitives: reports MyComponent (has primitive props, not memoized)
@@ -30,22 +35,31 @@ const MyComponent = ({ title, age }: { title: string; age: number }) => {
   );
 };
 
+// require-memo-primitives: reports Card (has a non-primitive prop, memo is unnecessary)
+const Card = React.memo(
+  ({ title, onClick }: { title: string; onClick: () => void }) => {
+    return <h1 onClick={onClick}>{title}</h1>;
+  },
+);
+
 // no-unnecessary-memo: reports Header (memoized, but takes no props)
 const Header = React.memo(() => {
   return <h1>Static</h1>;
 });
 
-// correct: memoized component with primitive props
+// require-memo-displayname: reports Correct (memoized, no displayName assigned)
 const Correct = React.memo(({ title }: { title: string }) => {
   return <h1>{title}</h1>;
 });
+Correct.displayName = "Correct"; // add this to satisfy require-memo-displayname
 ```
 
-None of the three linter APIs give a lint rule access to TypeScript's type checker, so all three
-implementations approximate "primitive prop" structurally instead of by real type: the
-ESLint/oxlint versions use a naming heuristic (lowercase-first identifier binding), while the
-Biome/GritQL version checks only that the parameter destructures into an object pattern at all.
-See each package's README for the exact heuristic and its known false positives/negatives.
+None of the three linter APIs give a lint rule access to a full TypeScript type checker, but all
+three read a component's actual TS type syntax when it's present (resolving a same-file
+`type`/`interface` by name) to decide whether each prop is primitive — a function, ref, or
+object-shaped prop is correctly excluded even if its binding name looks "primitive." When there's
+no type annotation at all (plain JS/JSX), each implementation falls back to a naming heuristic
+instead (see each package's README for the exact fallback and its known false positives/negatives).
 
 ## Development
 

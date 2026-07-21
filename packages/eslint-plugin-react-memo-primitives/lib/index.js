@@ -2,10 +2,12 @@
 
 const requireMemoPrimitives = require("./rules/require-memo-primitives");
 const noUnnecessaryMemo = require("./rules/no-unnecessary-memo");
+const requireMemoDisplayname = require("./rules/require-memo-displayname");
 
 const rules = {
   "require-memo-primitives": requireMemoPrimitives,
   "no-unnecessary-memo": noUnnecessaryMemo,
+  "require-memo-displayname": requireMemoDisplayname,
 };
 
 const pluginName = "react-memo-primitives";
@@ -23,6 +25,7 @@ plugin.configs.recommended = {
   rules: {
     [`${pluginName}/require-memo-primitives`]: "error",
     [`${pluginName}/no-unnecessary-memo`]: "error",
+    [`${pluginName}/require-memo-displayname`]: "error",
   },
 };
 
@@ -32,6 +35,7 @@ plugin.configs["flat/recommended"] = [
     rules: {
       [`${pluginName}/require-memo-primitives`]: "error",
       [`${pluginName}/no-unnecessary-memo`]: "error",
+      [`${pluginName}/require-memo-displayname`]: "error",
     },
   },
 ];

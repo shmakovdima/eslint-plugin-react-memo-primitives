@@ -2,6 +2,7 @@
   "jsPlugins": ["./index.js"],
   "rules": {
     "react-memo-primitives/require-memo-primitives": "error",
-    "react-memo-primitives/no-unnecessary-memo": "error"
+    "react-memo-primitives/no-unnecessary-memo": "error",
+    "react-memo-primitives/require-memo-displayname": "error"
   }
 }
