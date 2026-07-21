@@ -11,17 +11,31 @@ language js(jsx)
 // couldn't express that exclusion reliably as of Biome 2.5.4 (see README limitations). A
 // destructured prop that is itself an object/array will still be treated as primitive here.
 //
-// Each alternative below requires the function to be the *direct* declarator init (or a bare
-// declaration) — a `memo(...)`/`React.memo(...)`-wrapped function has a different outer shape
-// (the CallExpression sits between the declarator and the function) and so never matches these
-// patterns to begin with. That's what makes "not wrapped in memo" implicit here, instead of an
-// explicit `not contains` check on the component — the wrapped shape simply isn't one of these
-// alternatives.
+// Most alternatives below require the function to be the *direct* declarator init (or a bare
+// declaration) — a genuine `memo(...)`/`React.memo(...)`-wrapped function has a different outer
+// shape (the CallExpression sits between the declarator and the function) and so never matches
+// these patterns to begin with. That's what makes "not wrapped in memo" implicit for those
+// alternatives, instead of an explicit `not contains` check on the component.
+//
+// The last two alternatives cover the shadowed-import case: `const Foo = memo(($props) => ...)`
+// *looks* memo-wrapped, but if `memo`/`React` in this file is provably imported from somewhere
+// other than `'react'`, it isn't real memoization — the same case the ESLint/oxlint versions
+// handle via getFunctionAndDeclarator's looksLikeMemoCallExpression fallback. $program is
+// Biome's implicit metavariable bound to the file root.
 
 or {
   `const $name = ($props) => $body` as $component,
   `const $name = function ($props) { $body }` as $component,
-  `function $name($props) { $body }` as $component
+  `function $name($props) { $body }` as $component,
+  `const $name = memo(($props) => $body)` as $component where {
+    $program <: contains `import { memo } from $source` where { $source <: not `'react'` }
+  },
+  `const $name = React.memo(($props) => $body)` as $component where {
+    $program <: contains `import React from $source` where { $source <: not `'react'` }
+  },
+  `const $name = React.memo(($props) => $body)` as $component where {
+    $program <: contains `import * as React from $source` where { $source <: not `'react'` }
+  }
 } where {
   $props <: contains JsObjectBindingPattern(),
   $body <: contains JsxTagExpression(),

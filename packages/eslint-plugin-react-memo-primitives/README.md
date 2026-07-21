@@ -126,6 +126,11 @@ Both rules use naming heuristics, not type information, to decide whether a prop
 A prop bound to a lowercase identifier (other than `props`) is treated as primitive regardless of
 its actual type. There's no false-positive-proof way to do this without a type checker.
 
+Both rules check that `memo`/`React` are actually imported from `'react'` in the same file, so a
+same-named identifier imported from elsewhere (`import { memo } from 'some-other-lib'`) isn't
+mistaken for real memoization. When there's no relevant import in the file at all (e.g. a global
+`React`, or an isolated code snippet), both rules fall back to trusting the name, same as before.
+
 ## Testing
 
 ```sh

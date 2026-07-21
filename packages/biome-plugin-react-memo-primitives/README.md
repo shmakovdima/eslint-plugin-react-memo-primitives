@@ -52,6 +52,11 @@ object/array sub-patterns. A destructured prop that is itself an object or array
 express that exclusion reliably as of Biome 2.5.4 (see the comments in the `.grit` file for what
 was tried).
 
+Both rules check that `memo`/`React` are actually imported from `'react'` in the same file (via
+`$program <: contains \`import ... from $source\` where { $source <: not \`'react'\` }`), so a
+same-named identifier imported from elsewhere isn't mistaken for real memoization. With no
+relevant import in the file at all, both rules fall back to trusting the name.
+
 Biome's plugin system is under active development, and ancestor/"is this whole expression wrapped
 in X" matching has open upstream bugs in plugin mode (see
 [biomejs/biome#7363](https://github.com/biomejs/biome/issues/7363)). `require-memo-primitives.grit`

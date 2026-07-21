@@ -26,6 +26,18 @@ const CASES = [
     fixture: "require-memo-primitives.tsx",
   },
   { plugin: "no-unnecessary-memo.grit", fixture: "no-unnecessary-memo.tsx" },
+  {
+    plugin: "require-memo-primitives.grit",
+    fixture: "require-memo-primitives-shadowed-import.tsx",
+  },
+  {
+    plugin: "no-unnecessary-memo.grit",
+    fixture: "no-unnecessary-memo-shadowed-import.tsx",
+  },
+  {
+    plugin: "require-memo-primitives.grit",
+    fixture: "require-memo-primitives-real-import.tsx",
+  },
 ];
 
 function expectedErrorLines(fixturePath) {

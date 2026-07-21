@@ -3,6 +3,7 @@
 const {
   returnsJsx,
   getFunctionAndDeclarator,
+  getReactImportBindings,
   isWrappedInMemo,
 } = require("../utils");
 
@@ -22,13 +23,15 @@ module.exports = {
     },
   },
   create(context) {
+    let reactImports;
+
     function check(node) {
-      const match = getFunctionAndDeclarator(node);
+      const match = getFunctionAndDeclarator(node, reactImports);
       if (!match) return;
       const { fn, declarator } = match;
 
       if (!returnsJsx(fn.body)) return;
-      if (!isWrappedInMemo(declarator)) return;
+      if (!isWrappedInMemo(declarator, reactImports)) return;
 
       const hasProps =
         fn.params.length > 0 &&
@@ -46,6 +49,9 @@ module.exports = {
     }
 
     return {
+      Program(node) {
+        reactImports = getReactImportBindings(node);
+      },
       ArrowFunctionExpression: check,
       FunctionExpression: check,
     };

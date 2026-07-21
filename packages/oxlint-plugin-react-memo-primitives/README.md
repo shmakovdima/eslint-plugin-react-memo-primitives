@@ -47,6 +47,9 @@ Or copy `.oxlintrc.json` from this package as a starting point.
   native-Rust-only capability in oxlint). Both rules approximate "primitive prop" the same way
   the ESLint/Biome versions do: from the destructured binding name, not the actual type. A prop
   typed as an object but destructured directly (`{ config }`) will still be treated as primitive.
+- Both rules check that `memo`/`React` are actually imported from `'react'` in the same file, so
+  a same-named identifier imported from elsewhere isn't mistaken for real memoization. With no
+  relevant import in the file at all, both rules fall back to trusting the name.
 
 ## Testing
 

@@ -7,6 +7,12 @@ language js(jsx)
 // nested `or` of `contains` conditions (that combination fails to compile as of Biome 2.5.4 —
 // see README limitations). Instead, every no-params/empty-destructure/memo-vs-React.memo/
 // arrow-vs-function-expression combination is spelled out as its own top-level alternative.
+//
+// `$notShadowed` guards against a same-named `memo`/`React` that's actually imported from
+// somewhere other than `'react'` (not real memoization) — it passes when there's no
+// contradicting import in the file at all (no import info => trust the name, same as the
+// ESLint/oxlint versions' fallback), and fails only when a provably non-react import for that
+// exact local name exists. `$program` is Biome's implicit metavariable bound to the file root.
 
 or {
   `const $name = memo(() => $body)` as $component,
@@ -27,6 +33,9 @@ or {
   }
 } where {
   $body <: contains JsxTagExpression(),
+  not $program <: contains `import { memo } from $source` where { $source <: not `'react'` },
+  not $program <: contains `import React from $source` where { $source <: not `'react'` },
+  not $program <: contains `import * as React from $source` where { $source <: not `'react'` },
   register_diagnostic(
     span = $name,
     message = "Component with no props does not need to be wrapped in React.memo",

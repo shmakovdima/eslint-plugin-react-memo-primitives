@@ -1,6 +1,6 @@
 {
   "name": "eslint-plugin-react-memo-primitives",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Enforce React.memo on components with primitive props, and flag unnecessary React.memo on components with no props",
   "license": "MIT",
   "repository": "shmakovdima/eslint-plugin-react-memo-primitives",

@@ -3,6 +3,7 @@ const {
   returnsJsx,
   getFunctionAndDeclarator,
   hasOnlyPrimitiveProps,
+  getReactImportBindings,
   isWrappedInMemo,
   getObjectPatternParam,
   getReportNode,
@@ -17,8 +18,10 @@ const requireMemoPrimitives = defineRule({
     },
   },
   create(context) {
+    let reactImports;
+
     function check(node) {
-      const match = getFunctionAndDeclarator(node);
+      const match = getFunctionAndDeclarator(node, reactImports);
       if (!match) return;
       const { fn, declarator } = match;
 
@@ -29,7 +32,7 @@ const requireMemoPrimitives = defineRule({
 
       if (!hasOnlyPrimitiveProps(objectPattern)) return;
 
-      if (!isWrappedInMemo(declarator)) {
+      if (!isWrappedInMemo(declarator, reactImports)) {
         context.report({
           message:
             "Component with primitive props should be wrapped in React.memo",
@@ -39,6 +42,9 @@ const requireMemoPrimitives = defineRule({
     }
 
     return {
+      Program(node) {
+        reactImports = getReactImportBindings(node);
+      },
       ArrowFunctionExpression: check,
       FunctionExpression: check,
       FunctionDeclaration: check,
@@ -54,13 +60,15 @@ const noUnnecessaryMemo = defineRule({
     },
   },
   create(context) {
+    let reactImports;
+
     function check(node) {
-      const match = getFunctionAndDeclarator(node);
+      const match = getFunctionAndDeclarator(node, reactImports);
       if (!match) return;
       const { fn, declarator } = match;
 
       if (!returnsJsx(fn.body)) return;
-      if (!isWrappedInMemo(declarator)) return;
+      if (!isWrappedInMemo(declarator, reactImports)) return;
 
       const hasProps =
         fn.params.length > 0 &&
@@ -79,6 +87,9 @@ const noUnnecessaryMemo = defineRule({
     }
 
     return {
+      Program(node) {
+        reactImports = getReactImportBindings(node);
+      },
       ArrowFunctionExpression: check,
       FunctionExpression: check,
     };

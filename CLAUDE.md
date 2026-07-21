@@ -35,6 +35,22 @@ package's section below for the exact heuristic (they differ between ESLint/oxli
 `React.memo(...)` (member expression) — keep both forms in sync across all three implementations
 when changing detection logic.
 
+**Import-source verification** (all three packages, since 1.1.0): a bare `memo`/`React` identifier
+is only trusted as real memoization if there's no import statement in the file that provably binds
+that name to something other than `'react'`. No import info at all (isolated snippets, globals)
+falls back to trusting the name — this preserves the pre-1.1.0 behavior for the common case and
+only rejects a _provable_ shadow (`import { memo } from 'some-other-lib'`). In ESLint/oxlint,
+`getReactImportBindings()` in `utils.js` walks `Program.body` for `ImportDeclaration`s once per
+file and returns a `shadowedNames` Set consulted by `isMemoCallExpression`. A separate, purely
+structural `looksLikeMemoCallExpression()` (no import awareness) still decides whether
+`getFunctionAndDeclarator` unwraps a `CallExpression` wrapper at all — without it, a shadowed
+`memo(...)` call would be skipped entirely as an "unrecognized component shape" instead of being
+correctly treated as _not_ memoized (this was a real regression caught by the RuleTester/fixture
+suite while first implementing the feature: `require-memo-primitives` silently stopped flagging
+shadowed-memo components instead of catching them). In Biome/GritQL, the same check is expressed
+via `not $program <: contains \`import { memo } from $source\` where { $source <: not \`'react'\` }`
+(`$program`is Biome's implicit metavariable for the file root) —`require-memo-primitives.grit`additionally needs dedicated`or`alternatives for the shadowed-memo-wrapped shape (mirroring the`looksLikeMemoCallExpression`split above), since its other alternatives structurally exclude any`memo(...)`-wrapped call by design.
+
 **Gotcha when walking up from the function node to find the enclosing declarator**: a
 memo-wrapped component's function node's _direct_ parent is the `memo(...)` `CallExpression`, not
 the `VariableDeclarator` — `const Foo = memo((props) => ...)` puts a CallExpression between the

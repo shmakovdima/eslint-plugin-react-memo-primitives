@@ -4,6 +4,7 @@ const {
   returnsJsx,
   getFunctionAndDeclarator,
   hasOnlyPrimitiveProps,
+  getReactImportBindings,
   isWrappedInMemo,
   getObjectPatternParam,
   getReportNode,
@@ -26,8 +27,10 @@ module.exports = {
     },
   },
   create(context) {
+    let reactImports;
+
     function check(node) {
-      const match = getFunctionAndDeclarator(node);
+      const match = getFunctionAndDeclarator(node, reactImports);
       if (!match) return;
       const { fn, declarator } = match;
 
@@ -38,7 +41,7 @@ module.exports = {
 
       if (!hasOnlyPrimitiveProps(objectPattern)) return;
 
-      if (!isWrappedInMemo(declarator)) {
+      if (!isWrappedInMemo(declarator, reactImports)) {
         context.report({
           node: getReportNode(fn, declarator),
           messageId: "missingMemo",
@@ -47,6 +50,9 @@ module.exports = {
     }
 
     return {
+      Program(node) {
+        reactImports = getReactImportBindings(node);
+      },
       ArrowFunctionExpression: check,
       FunctionExpression: check,
       FunctionDeclaration: check,

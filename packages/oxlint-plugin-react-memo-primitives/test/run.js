@@ -23,6 +23,18 @@ const OXLINT_BIN = path.join(
 const CASES = [
   { rule: "require-memo-primitives", fixture: "require-memo-primitives.tsx" },
   { rule: "no-unnecessary-memo", fixture: "no-unnecessary-memo.tsx" },
+  {
+    rule: "require-memo-primitives",
+    fixture: "require-memo-primitives-shadowed-import.tsx",
+  },
+  {
+    rule: "no-unnecessary-memo",
+    fixture: "no-unnecessary-memo-shadowed-import.tsx",
+  },
+  {
+    rule: "require-memo-primitives",
+    fixture: "require-memo-primitives-real-import.tsx",
+  },
 ];
 
 function expectedErrorLines(fixturePath) {
