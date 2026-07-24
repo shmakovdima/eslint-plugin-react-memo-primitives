@@ -216,3 +216,21 @@ const WithChildrenUnused = ({
 }: PropsWithChildren<{ title: string }>) => {
   return <div>{title}</div>;
 };
+
+type NamedChildrenProps = { locale: string; variant: "home" | "metal" };
+
+// expect-ok: regression — PropsWithChildren<T> where T is a reference to a locally-declared
+// type alias (not inline) must be excluded the same way as an inline literal
+const WithChildrenNamedType = ({
+  locale,
+  variant,
+  children,
+}: PropsWithChildren<NamedChildrenProps>) => {
+  return (
+    <div>
+      {locale}
+      {variant}
+      {children}
+    </div>
+  );
+};

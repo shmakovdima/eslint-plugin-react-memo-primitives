@@ -226,11 +226,13 @@ const NON_PRIMITIVE_SENTINEL = Object.freeze({
 // `React.PropsWithChildren<T>` / `PropsWithChildren<T>` (React's own generic helper type,
 // `type PropsWithChildren<P> = P & { children?: ReactNode }`) is common enough in real prop
 // types that it's handled specially: unlike an arbitrary unresolvable generic reference (no
-// known shape at all), this one has a well-known shape — take T's members (if T is an inline
-// object literal) and add a synthetic non-primitive `children` member, since ReactNode is never
-// primitive. Returns null if the reference isn't PropsWithChildren, or its single type argument
-// isn't an inline object literal.
-function resolvePropsWithChildrenMembers(annotation) {
+// known shape at all), this one has a well-known shape — take T's members and add a synthetic
+// non-primitive `children` member, since ReactNode is never primitive. T can be either an inline
+// object literal or a reference to a locally-declared object-shaped type/interface (resolved via
+// resolveLocalTypeDeclaration, same as any other named type reference). Returns null if the
+// reference isn't PropsWithChildren, or T isn't an inline object literal or a resolvable local
+// object-shaped type.
+function resolvePropsWithChildrenMembers(annotation, programNode) {
   if (
     annotation.type !== "TSTypeReference" ||
     annotation.typeArguments?.params?.length !== 1
@@ -248,10 +250,20 @@ function resolvePropsWithChildrenMembers(annotation) {
   if (name !== "PropsWithChildren") return null;
 
   const typeArg = annotation.typeArguments.params[0];
-  if (typeArg.type !== "TSTypeLiteral") return null;
+  let members;
+  if (typeArg.type === "TSTypeLiteral") {
+    members = typeArg.members;
+  } else if (
+    typeArg.type === "TSTypeReference" &&
+    typeArg.typeName.type === "Identifier" &&
+    programNode
+  ) {
+    members = resolveLocalTypeMembers(programNode, typeArg.typeName.name);
+  }
+  if (!members) return null;
 
   return [
-    ...typeArg.members,
+    ...members,
     {
       type: "TSPropertySignature",
       key: { type: "Identifier", name: "children" },
@@ -273,7 +285,10 @@ function getObjectPatternMemberTypes(objectPattern, programNode) {
     return annotation.members;
   }
 
-  const propsWithChildrenMembers = resolvePropsWithChildrenMembers(annotation);
+  const propsWithChildrenMembers = resolvePropsWithChildrenMembers(
+    annotation,
+    programNode,
+  );
   if (propsWithChildrenMembers) return propsWithChildrenMembers;
 
   if (

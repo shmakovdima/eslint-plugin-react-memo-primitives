@@ -356,6 +356,21 @@ tsRuleTester.run("require-memo-primitives (PropsWithChildren)", rule, {
       return <div>{title}{children}</div>;
     };
     `,
+    // Regression: T as a reference to a locally-declared object type alias (not inline) — must
+    // resolve the same way as an inline literal.
+    `
+    type Props = { locale: string; variant: "home" | "metal"; homeText?: string };
+    const MyComponent = ({ locale, variant, children }: PropsWithChildren<Props>) => {
+      return <div>{locale}{variant}{children}</div>;
+    };
+    `,
+    // Same, but T references a locally-declared interface.
+    `
+    interface Props { title: string; }
+    const MyComponent = ({ title, children }: PropsWithChildren<Props>) => {
+      return <div>{title}{children}</div>;
+    };
+    `,
   ],
   invalid: [
     // T's members alone are all-primitive even when `children` isn't destructured — still
@@ -376,6 +391,27 @@ tsRuleTester.run("require-memo-primitives (PropsWithChildren)", rule, {
       });
       `,
       errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
+    },
+    // Regression companion: named-type-reference T, memo-wrapped, must be actively flagged too.
+    {
+      code: `
+      type Props = { locale: string };
+      const MyComponent = memo(({ locale, children }: PropsWithChildren<Props>) => {
+        return <div>{locale}{children}</div>;
+      });
+      `,
+      errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
+    },
+    // Named-type-reference T, `children` NOT destructured — still requires memo (T's members are
+    // all-primitive on their own).
+    {
+      code: `
+      type Props = { locale: string };
+      const MyComponent = ({ locale }: PropsWithChildren<Props>) => {
+        return <div>{locale}</div>;
+      };
+      `,
+      errors: [{ messageId: "missingMemo" }],
     },
   ],
 });

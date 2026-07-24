@@ -174,3 +174,28 @@ const _WithChildrenUnused = ({
 }: PropsWithChildren<{ title: string }>) => {
   return <div>{title}</div>;
 };
+
+type _NamedChildrenProps = { locale: string; variant: "home" | "metal" };
+
+// expect-ok: regression — PropsWithChildren<T> where T is a reference to a locally-declared
+// type alias (not inline) must resolve the same way as an inline literal
+const _WithChildrenNamedType = ({
+  locale,
+  variant,
+  children,
+}: PropsWithChildren<_NamedChildrenProps>) => {
+  return (
+    <div>
+      {locale}
+      {variant}
+      {children}
+    </div>
+  );
+};
+
+// expect-error: same named-type-reference T, but children not destructured — still all-primitive
+const _WithChildrenNamedTypeUnused = ({
+  locale,
+}: PropsWithChildren<_NamedChildrenProps>) => {
+  return <div>{locale}</div>;
+};
