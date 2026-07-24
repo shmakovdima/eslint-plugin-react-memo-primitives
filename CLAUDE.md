@@ -44,10 +44,14 @@ the logic is small.
    key against the whole file — no self-containment issue here since `$program` is a genuinely
    separate part of the tree from `$name`'s own declaration).
 
-None of the three linter APIs expose a real TypeScript type _checker_ to a lint rule (no
-cross-file type resolution), but as of 1.2.0 all three read a component's actual TS type
-_syntax_ when it's present, instead of guessing from the destructured binding's name. A prop's
-declared type is classified as primitive/non-primitive as follows:
+None of the three linter APIs expose a real TypeScript type _checker_ to a lint rule by default
+(no cross-file type resolution), but as of 1.2.0 all three read a component's actual TS type
+_syntax_ when it's present, instead of guessing from the destructured binding's name. As of 1.2.3,
+the ESLint package additionally upgrades to a real type checker automatically when the consumer's
+own ESLint config is already type-aware (`parserOptions.project` set) — see that package's section
+below for details; oxlint and Biome have no such upgrade path (see their sections for why) and
+always use the syntax-only classification described here. A prop's declared type is classified as
+primitive/non-primitive as follows when only syntax (no checker) is available:
 
 - **Always primitive**: `string`/`number`/`boolean`/`bigint`/`null`/`undefined`/`void`, a literal
   type, a template literal type, or a union/intersection of only those.
@@ -152,6 +156,41 @@ member + a `JSX.Element` union member (must NOT require memo); a local `enum` an
 primitive type alias (must require memo); a local object-shaped type alias member and a tuple
 type (must NOT require memo). Tests: `test/*.test.js`, using ESLint's `RuleTester`, run via
 `npm test` (`node --test test/`).
+
+**Type-aware upgrade (since 1.2.3)**: the syntax-only classification above has one known blind
+spot — a bare `TSTypeReference` this file can't resolve locally (the common case: an imported
+type) falls back to trusting it as primitive unless it carries type arguments. This is wrong
+whenever the imported reference is actually an object type (real production report: a `Props`
+type with an imported `DehydratedState` field from `@tanstack/react-query` was silently trusted as
+primitive and never flagged for missing memo). `getParserServices(context)` in `lib/utils.js`
+detects whether the consumer's own ESLint config is already type-aware — `parserOptions.project`
+set, giving `@typescript-eslint/parser` a real `ts.Program` — via
+`context.sourceCode.parserServices` (falling back to the legacy `context.parserServices`) exposing
+both `.program` and `.esTreeNodeToTSNodeMap`; returns `null` (and every function below silently
+keeps today's syntax-only behavior) if not. When available, `isPrimitiveTsType()` maps a
+`TSTypeReference` node to its real TS node via `esTreeNodeToTSNodeMap.get()` and asks
+`checker.getTypeAtLocation()` for the actual type, classifying it by `ts.TypeFlags` bitmask
+(`isTsTypePrimitive()`, recursing into union/intersection constituents) — **this checker verdict
+wins outright over local-file resolution and the bare/generic-argument heuristic, for every
+reference, local or imported**, since the checker is authoritative where the heuristic could only
+guess. `getObjectPatternMemberTypes()` and `resolvePropsWithChildrenMembers()` also gained a
+checker-only path (`resolveMembersByChecker()`, using `checker.getPropertiesOfType()`) for when
+the _props type itself_ — not just one member — is an unresolvable-locally reference (e.g.
+`({ a, b }: ImportedProps) => ...`, or `PropsWithChildren<ImportedProps>`): each property is
+looked up via the checker and wrapped as a synthetic `TSPropertySignature` carrying a
+`PRIMITIVE_SENTINEL`/`NON_PRIMITIVE_SENTINEL` marker (no real ESTree type node exists for a
+checker-only-resolved member, so `isPrimitiveTsType()` checks for these two sentinels first, before
+any AST-kind or checker lookup, and returns their precomputed verdict directly). This is opt-in by
+capability, not a rule option — a consumer who hasn't configured `parserOptions.project` sees zero
+behavior change. Only the ESLint package can do this: oxlint's JS plugin API has no type-checker
+access at all (type-aware linting is native-Rust-only there), and Biome's GritQL has no type
+checker access either — see those packages' sections for their (unchanged) syntax-only behavior.
+Regression coverage lives in `test/require-memo-primitives-type-aware.test.js`, a separate
+`RuleTester` configured with `parserOptions.project` pointing at
+`test/fixtures-type-aware/tsconfig.json` (type-aware linting needs a real `ts.Program`, so cases
+use `filename` pointing at the fixture dir's `cases.tsx`, not just an in-memory `code` string) —
+covers an imported object type (the reported false negative), an imported enum (regression against
+the case the heuristic already got right), and an imported generic instantiation.
 
 ### `packages/biome-plugin-react-memo-primitives`
 

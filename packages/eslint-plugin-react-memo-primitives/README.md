@@ -170,6 +170,13 @@ parses TypeScript files with `@typescript-eslint/parser` (a `dependencies` entry
 so it's installed automatically); projects parsing `.tsx` with the default parser, or linting
 plain `.jsx`, fall back to the naming heuristic described below.
 
+If your ESLint config additionally sets `parserOptions.project` (standard type-aware ESLint —
+gives `@typescript-eslint/parser` a real TypeScript program and checker), `require-memo-primitives`
+automatically upgrades to asking the real type checker for every type reference instead of
+guessing, including types imported from other files or packages. No extra configuration or rule
+option is needed — it's detected automatically, and everything below in this section only applies
+when type-aware linting is off.
+
 ## Limitations
 
 `require-memo-primitives` reads the destructured parameter's real TS type annotation when one is
@@ -182,10 +189,18 @@ current file at all (imported from elsewhere, a generic parameter) falls back to
 signal: a reference with type arguments (`MutableRefObject<T>`) is always non-primitive, while a
 bare reference with none (an imported enum or simple alias, e.g. `LocaleType`) is trusted as
 primitive — this is optimistic rather than conservative, since imported object-shaped type
-aliases with no generics are the uncommon case for prop types. When there's no type annotation at
-all (plain JS/JSX), both rules fall back to a naming heuristic: a prop bound to a lowercase
-identifier (other than `props`) is treated as primitive regardless of its actual runtime value —
-there's no false-positive-proof way to do this without type information.
+aliases with no generics are the uncommon case for prop types.
+
+**This whole paragraph's heuristic is skipped entirely when type-aware linting is on** (see
+Compatibility above) — the real checker resolves imported types correctly in both directions,
+including imported object-shaped aliases with no generics (the case the heuristic above gets
+wrong). If you're hitting a false positive/negative on an imported type, turning on
+`parserOptions.project` is the fix, not working around the heuristic.
+
+When there's no type annotation at all (plain JS/JSX), both rules fall back to a naming heuristic:
+a prop bound to a lowercase identifier (other than `props`) is treated as primitive regardless of
+its actual runtime value — there's no false-positive-proof way to do this without type
+information, type-aware or not.
 
 All three rules check that `memo`/`React` are actually imported from `'react'` in the same file,
 so a same-named identifier imported from elsewhere (`import { memo } from 'some-other-lib'`)

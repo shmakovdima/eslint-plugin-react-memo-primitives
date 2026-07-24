@@ -57,7 +57,9 @@ Biome 2.5; this package does not ship fixers.
 
 ## Limitations
 
-GritQL has no type _checker_, but it does parse TS type syntax, and `require-memo-primitives.grit`
+GritQL has no type _checker_ and no upgrade path to one — unlike the ESLint package in this same
+monorepo, which can use a real checker when the consumer's config is type-aware. It does parse TS
+type syntax though, and `require-memo-primitives.grit`
 reads it: when the parameter has a type annotation (inline object type, or a reference to a
 `type`/`interface` in the same file), each member's type is inspected and the component is only
 flagged if every member is a primitive type (string/number/boolean/etc., or unions of those) — a

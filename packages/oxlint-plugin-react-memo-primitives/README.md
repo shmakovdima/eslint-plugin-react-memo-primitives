@@ -59,7 +59,9 @@ Or copy `.oxlintrc.json` from this package as a starting point.
 - **oxlint's JS plugin API is currently alpha and not subject to semver** — breaking changes are
   possible in future oxlint releases. Pin your oxlint version accordingly.
 - oxlint's JS plugins have no access to a TypeScript type _checker_ (type-aware linting is a
-  native-Rust-only capability in oxlint), but oxc parses `.tsx` type syntax natively, so
+  native-Rust-only capability in oxlint, not exposed to JS plugins), and there's no upgrade path
+  for this — unlike the ESLint package in this same monorepo, which can use a real checker when
+  the consumer's config is type-aware. oxc parses `.tsx` type syntax natively though, so
   `require-memo-primitives` reads it directly: an inline object type or a same-file
   `type`/`interface`/`enum` reference is resolved and each member's declared type is checked.
   Objects, functions, arrays, tuples, and mapped types are always non-primitive; a reference

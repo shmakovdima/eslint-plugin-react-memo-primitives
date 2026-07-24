@@ -8,6 +8,7 @@ const {
   isWrappedInMemo,
   getObjectPatternParam,
   getReportNode,
+  getParserServices,
 } = require("../utils");
 
 module.exports = {
@@ -31,6 +32,7 @@ module.exports = {
   create(context) {
     let reactImports;
     let programNode;
+    const checkerCtx = getParserServices(context);
 
     function check(node) {
       const match = getFunctionAndDeclarator(node, reactImports);
@@ -43,7 +45,11 @@ module.exports = {
       if (!objectPattern || objectPattern.properties.length === 0) return;
 
       const wrapped = isWrappedInMemo(declarator, reactImports);
-      const allPrimitive = hasOnlyPrimitiveProps(objectPattern, programNode);
+      const allPrimitive = hasOnlyPrimitiveProps(
+        objectPattern,
+        programNode,
+        checkerCtx,
+      );
 
       if (allPrimitive && !wrapped) {
         context.report({
