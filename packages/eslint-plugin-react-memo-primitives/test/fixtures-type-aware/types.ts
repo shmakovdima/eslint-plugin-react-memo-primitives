@@ -19,3 +19,11 @@ export enum ImportedEnum {
 export type ImportedGenericWrapper<T> = {
   value: T;
 };
+
+// Props-shaped type meant to be wrapped in PropsWithChildren<T> — exercises
+// resolveMembersByChecker's PropsWithChildren-specific call site (as opposed to
+// getObjectPatternMemberTypes's own direct call for a plain, non-PropsWithChildren reference).
+export type ImportedProps = {
+  label: string;
+  data: ImportedObjectType;
+};

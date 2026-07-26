@@ -106,6 +106,22 @@ typeAwareRuleTester.run(
         `,
         errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
       },
+      // PropsWithChildren<ImportedProps>: T is an imported type, not declared in this file, so
+      // resolvePropsWithChildrenMembers falls through to resolveMembersByChecker specifically
+      // (distinct from getObjectPatternMemberTypes's own direct checker call for a plain
+      // reference) — ImportedProps has a non-primitive `data` member, so memo must be flagged.
+      {
+        filename: FILENAME,
+        code: `
+        import { memo } from 'react';
+        import { PropsWithChildren } from 'react';
+        import { ImportedProps } from './types';
+        const MyComponent = memo(({ label, data, children }: PropsWithChildren<ImportedProps>) => {
+          return <div>{label}{JSON.stringify(data)}{children}</div>;
+        });
+        `,
+        errors: [{ messageId: "unnecessaryMemoNonPrimitive" }],
+      },
     ],
   },
 );

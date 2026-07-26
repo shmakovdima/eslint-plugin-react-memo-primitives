@@ -132,9 +132,16 @@ const NON_PRIMITIVE_TS_TYPE_KINDS = new Set([
  * members/literals (TS enums compile to string/number values, never objects). Deliberately
  * excludes `ts.TypeFlags.Any`/`Unknown` — an untyped/unresolvable-to-TS value isn't provably
  * primitive, so it should fall through to non-primitive rather than being trusted.
+ *
+ * Cached per `ts` module on first use — the mask is a constant for a given TypeScript install,
+ * so there's no need to re-OR the same TypeFlags together on every classified member.
  */
+const primitiveTypeFlagsMaskCache = new WeakMap();
 function buildPrimitiveTypeFlagsMask(ts) {
-  return (
+  const cached = primitiveTypeFlagsMaskCache.get(ts);
+  if (cached !== undefined) return cached;
+
+  const mask =
     ts.TypeFlags.StringLike |
     ts.TypeFlags.NumberLike |
     ts.TypeFlags.BooleanLike |
@@ -145,8 +152,9 @@ function buildPrimitiveTypeFlagsMask(ts) {
     ts.TypeFlags.Undefined |
     ts.TypeFlags.Never |
     ts.TypeFlags.EnumLiteral |
-    ts.TypeFlags.Literal
-  );
+    ts.TypeFlags.Literal;
+  primitiveTypeFlagsMaskCache.set(ts, mask);
+  return mask;
 }
 
 /**
@@ -169,29 +177,40 @@ function isTsTypePrimitive(type, ts) {
  * Looks up parser services for type-aware linting (see getParserServices) and, if a real TS
  * Program is available, maps the given ESTree type node to its TS node and asks the checker
  * directly whether it's primitive. Returns null when type-aware info isn't available for this
- * node (no parser services, or the ESTree→TS mapping doesn't have this node) — callers treat
- * null as "checker has no opinion, fall back to the AST heuristic," not "non-primitive."
+ * node (no parser services, the ESTree→TS mapping doesn't have this node, or the checker call
+ * itself throws — e.g. a stale node in an incremental-lint/editor context where the TS Program
+ * and the ESTree→TS map can desync across passes) — callers treat null as "checker has no
+ * opinion, fall back to the AST heuristic," not "non-primitive." A checker exception must never
+ * propagate out of here: this is an opportunistic upgrade over the AST-only heuristic, not a
+ * required dependency, so any failure just forfeits the upgrade for this one node.
  */
 function isPrimitiveByChecker(typeNode, checkerCtx) {
   if (!checkerCtx) return null;
   const { ts, checker, esTreeNodeToTSNodeMap } = checkerCtx;
-  const tsNode = esTreeNodeToTSNodeMap.get(typeNode);
-  if (!tsNode) return null;
-  const type = checker.getTypeAtLocation(tsNode);
-  if (!type) return null;
-  return isTsTypePrimitive(type, ts);
+  try {
+    const tsNode = esTreeNodeToTSNodeMap.get(typeNode);
+    if (!tsNode) return null;
+    const type = checker.getTypeAtLocation(tsNode);
+    if (!type) return null;
+    return isTsTypePrimitive(type, ts);
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Recursively classifies a TS type node as primitive-or-not. Unions (`string | undefined`) are
  * primitive only if every member is. A `TSTypeReference` (`LocaleType`, `MutableRefObject<T>`)
- * is, when a type-aware `checkerCtx` is available (see getParserServices — requires the
- * consumer's own ESLint config to set `parserOptions.project`), resolved via the real TypeScript
- * checker instead of the AST-only heuristic below — the checker's answer wins outright for ANY
- * reference, local or imported, since it's authoritative where the heuristic can only guess.
- * Without a checker, a `TSTypeReference` is resolved against local declarations in the same file
- * (object-shaped ones are handled by getObjectPatternMemberTypes/hasOnlyPrimitiveProps directly;
- * this function handles a reference that shows up as a *member's* type, e.g. `age: SomeEnum`):
+ * is first resolved against local declarations in the same file, exactly as it always was before
+ * the type-aware checker upgrade — this keeps behavior for an existing type-aware consumer's
+ * locally-declared types stable across the upgrade to `parserOptions.project`-aware mode. Only
+ * when the reference can't be resolved locally at all (the common real case: an imported type) is
+ * a type-aware `checkerCtx` (see getParserServices — requires the consumer's own ESLint config to
+ * set `parserOptions.project`) consulted instead of the bare/generic-argument structural fallback
+ * — the checker is authoritative there because the heuristic has nothing to go on but guessing.
+ * This function handles a reference that shows up as a *member's* type, e.g. `age: SomeEnum`
+ * (object-shaped locals are handled by getObjectPatternMemberTypes/hasOnlyPrimitiveProps
+ * directly):
  *   - A local `enum` is always primitive (TS enums compile to string/number values, never
  *     objects/functions).
  *   - A local type alias that itself resolves to a primitive is unwrapped and checked
@@ -231,26 +250,27 @@ function isPrimitiveTsType(typeNode, programNode, checkerCtx) {
     typeNode.type === "TSTypeReference" &&
     typeNode.typeName.type === "Identifier"
   ) {
+    const resolved = programNode
+      ? resolveLocalTypeDeclaration(programNode, typeNode.typeName.name)
+      : null;
+    if (resolved !== null) {
+      if (resolved.kind === "enum") return true;
+      if (resolved.kind === "primitive-alias") {
+        return isPrimitiveTsType(resolved.typeNode, programNode, checkerCtx);
+      }
+      // resolved.kind === "object" (interface / object type alias) — a nested object-shaped
+      // member is never primitive.
+      return false;
+    }
+
+    // Not declared in this file — ask the checker if one's available (the common real case:
+    // an imported type, which the AST-only path can never resolve).
     const checkerVerdict = isPrimitiveByChecker(typeNode, checkerCtx);
     if (checkerVerdict !== null) return checkerVerdict;
 
-    if (!programNode) return false;
-    const resolved = resolveLocalTypeDeclaration(
-      programNode,
-      typeNode.typeName.name,
-    );
-    if (resolved === null) {
-      // Unresolvable in this file — trust a bare reference as primitive (likely enum/alias),
-      // but never a generic instantiation (always a wrapper type, e.g. MutableRefObject<T>).
-      return typeNode.typeArguments == null;
-    }
-    if (resolved.kind === "enum") return true;
-    if (resolved.kind === "primitive-alias") {
-      return isPrimitiveTsType(resolved.typeNode, programNode, checkerCtx);
-    }
-    // resolved.kind === "object" (interface / object type alias) — a nested object-shaped
-    // member is never primitive.
-    return false;
+    // No checker either — trust a bare reference as primitive (likely enum/alias), but never a
+    // generic instantiation (always a wrapper type, e.g. MutableRefObject<T>).
+    return typeNode.typeArguments == null;
   }
   return false;
 }
@@ -342,28 +362,36 @@ function resolveLocalTypeMembers(programNode, typeName) {
  * ESTree type node exists for a checker-only-resolved member, so a normal `: $member` type node
  * can't be fabricated — the sentinel short-circuits isPrimitiveTsType directly with the verdict
  * already computed here). Returns null if the checker can't resolve typeArgNode to an object type
- * at all (e.g. T is itself unresolvable, or resolves to a primitive/union).
+ * at all (e.g. T is itself unresolvable, or resolves to a primitive/union), or if any checker call
+ * throws (e.g. a stale node in an incremental-lint/editor context) — callers fall back to treating
+ * this as "no type info available" rather than letting the exception crash the whole lint run.
  */
 function resolveMembersByChecker(typeArgNode, checkerCtx) {
   const { ts, checker, esTreeNodeToTSNodeMap } = checkerCtx;
-  const tsNode = esTreeNodeToTSNodeMap.get(typeArgNode);
-  if (!tsNode) return null;
-  const type = checker.getTypeAtLocation(tsNode);
-  if (!type) return null;
-  const properties = checker.getPropertiesOfType(type);
-  if (!properties.length) return null;
+  try {
+    const tsNode = esTreeNodeToTSNodeMap.get(typeArgNode);
+    if (!tsNode) return null;
+    const type = checker.getTypeAtLocation(tsNode);
+    if (!type) return null;
+    const properties = checker.getPropertiesOfType(type);
+    if (!properties.length) return null;
 
-  return properties.map((symbol) => {
-    const propType = checker.getTypeOfSymbol(symbol);
-    const primitive = isTsTypePrimitive(propType, ts);
-    return {
-      type: "TSPropertySignature",
-      key: { type: "Identifier", name: symbol.name },
-      typeAnnotation: {
-        typeAnnotation: primitive ? PRIMITIVE_SENTINEL : NON_PRIMITIVE_SENTINEL,
-      },
-    };
-  });
+    return properties.map((symbol) => {
+      const propType = checker.getTypeOfSymbol(symbol);
+      const primitive = isTsTypePrimitive(propType, ts);
+      return {
+        type: "TSPropertySignature",
+        key: { type: "Identifier", name: symbol.name },
+        typeAnnotation: {
+          typeAnnotation: primitive
+            ? PRIMITIVE_SENTINEL
+            : NON_PRIMITIVE_SENTINEL,
+        },
+      };
+    });
+  } catch {
+    return null;
+  }
 }
 
 /**
