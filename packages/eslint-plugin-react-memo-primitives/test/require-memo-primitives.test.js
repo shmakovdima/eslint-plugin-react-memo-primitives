@@ -91,6 +91,13 @@ ruleTester.run(
 
 tsRuleTester.run("require-memo-primitives (typed)", rule, {
   valid: [
+    // Async Server Components are outside the scope of React.memo optimization.
+    `
+    type BlogPostPageProps = { locale: string; slug: string };
+    export async function BlogPostPage({ locale, slug }: BlogPostPageProps) {
+      return <article>{locale}-{slug}</article>;
+    }
+    `,
     // Regression (reported false positive): emailInputRef is a MutableRefObject, register is
     // a UseFormRegisterReturn, and handleAcceptClick is a function — none of those are
     // primitives, so this component must NOT be flagged as needing memo even though most of
