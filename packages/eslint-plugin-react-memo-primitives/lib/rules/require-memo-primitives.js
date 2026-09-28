@@ -2,6 +2,7 @@
 
 const {
   returnsJsx,
+  isAsyncFunction,
   getFunctionAndDeclarator,
   hasOnlyPrimitiveProps,
   getReactImportBindings,
@@ -39,6 +40,7 @@ module.exports = {
       if (!match) return;
       const { fn, declarator } = match;
 
+      if (isAsyncFunction(fn)) return;
       if (!returnsJsx(fn.body)) return;
 
       const objectPattern = getObjectPatternParam(fn);

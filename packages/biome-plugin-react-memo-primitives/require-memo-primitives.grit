@@ -117,6 +117,7 @@ or {
     )
   },
   `const $name = function ($props) { $body }` as $component where {
+    $component <: not `const $asyncname = async function ($asyncprops) { $asyncbody }`,
     $props <: contains JsObjectBindingPattern(),
     $body <: contains JsxTagExpression(),
     or {
@@ -175,6 +176,7 @@ or {
     )
   },
   `function $name($props) { $body }` as $component where {
+    $component <: not `async function $asyncname($asyncprops) { $asyncbody }`,
     $props <: contains JsObjectBindingPattern(),
     $body <: contains JsxTagExpression(),
     or {

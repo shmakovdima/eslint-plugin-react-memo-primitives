@@ -18,6 +18,13 @@ function returnsJsx(body) {
 }
 
 /**
+ * Async React Server Components are not in the scope of React.memo optimization.
+ */
+function isAsyncFunction(node) {
+  return Boolean(node?.async);
+}
+
+/**
  * Extracts the function node (ArrowFunctionExpression | FunctionExpression) and its
  * enclosing VariableDeclarator for:
  *   - `const Foo = (props) => ...` / `const Foo = function (props) {}`
@@ -677,6 +684,7 @@ function hasDisplayNameAssignment(programNode, componentName) {
 
 module.exports = {
   returnsJsx,
+  isAsyncFunction,
   getFunctionAndDeclarator,
   hasOnlyPrimitiveProps,
   getReactImportBindings,

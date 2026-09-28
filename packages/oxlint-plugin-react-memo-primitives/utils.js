@@ -12,6 +12,10 @@ function returnsJsx(body) {
   return false;
 }
 
+function isAsyncFunction(node) {
+  return Boolean(node?.async);
+}
+
 // A memo-wrapped function's direct parent is the `memo(...)` CallExpression, not the
 // VariableDeclarator, so that case is unwrapped one level before falling back to the plain
 // declarator check.
@@ -449,6 +453,7 @@ function hasDisplayNameAssignment(programNode, componentName) {
 
 module.exports = {
   returnsJsx,
+  isAsyncFunction,
   getFunctionAndDeclarator,
   hasOnlyPrimitiveProps,
   getReactImportBindings,

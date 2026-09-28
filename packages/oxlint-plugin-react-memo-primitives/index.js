@@ -1,6 +1,7 @@
 const { definePlugin, defineRule } = require("@oxlint/plugins");
 const {
   returnsJsx,
+  isAsyncFunction,
   getFunctionAndDeclarator,
   hasOnlyPrimitiveProps,
   getReactImportBindings,
@@ -27,6 +28,7 @@ const requireMemoPrimitives = defineRule({
       if (!match) return;
       const { fn, declarator } = match;
 
+      if (isAsyncFunction(fn)) return;
       if (!returnsJsx(fn.body)) return;
 
       const objectPattern = getObjectPatternParam(fn);

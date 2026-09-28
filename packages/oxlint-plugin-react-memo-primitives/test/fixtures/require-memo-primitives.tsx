@@ -35,6 +35,11 @@ const _NoPropsNoMemo = () => {
   return <h1>Static</h1>;
 };
 
+// expect-ok: async Server Components are outside the scope of React.memo optimization
+async function _AsyncBlogPostPage({ locale, slug }: { locale: string; slug: string }) {
+  return <article>{locale}-{slug}</article>;
+}
+
 // expect-ok: not a component, no JSX
 const _util = ({ a, b }) => a + b;
 
